@@ -1,0 +1,460 @@
+name: "GLPI Docker Images"
+run-name: "GLPI Docker Images (${{ inputs.glpi-version || (github.event.pull_request.number && format('#{0}: {1}', github.event.pull_request.number, github.event.pull_request.title)) || github.event.head_commit.message || github.sha }})"
+
+# Unified workflow for building GLPI Docker images
+# - workflow_call: Called by GLPI repo for releases and nightly builds
+# - workflow_dispatch: Manual builds from this repo
+# - push/pull_request: CI test builds when workflow changes (no push)
+
+env:
+  # These will check Repository Variables first (perfect for fork), then use the default
+  DOCKER_IMAGES_REPO: ${{ vars.DOCKER_IMAGES_REPO || 'glpi-project/docker-images' }}
+  DOCKERHUB_IMAGE: ${{ vars.DOCKERHUB_IMAGE || 'glpi/glpi' }}
+  GHCR_IMAGE: ${{ vars.GHCR_IMAGE || 'ghcr.io/glpi-project/glpi' }}
+
+on:
+  # Reusable by other repos (e.g., glpi-project/glpi)
+  workflow_call:
+    inputs:
+      glpi-repo:
+        description: "GitHub repository to download GLPI from (owner/repo)"
+        required: false
+        type: string
+        default: "glpi-project/glpi"
+      glpi-version:
+        description: "GLPI version or branch to build"
+        required: true
+        type: string
+      push:
+        description: "Whether to push images to registries"
+        required: false
+        type: boolean
+        default: false
+      patch-url:
+        description: "URL to a .diff/.patch file to apply after source download, multiple patches can be separated by space"
+        required: false
+        type: string
+        default: ""
+      php-version:
+        required: false
+        type: string
+        default: "8.5"
+      image-tag:
+        description: "Override image tag. If not set, computed from version."
+        required: false
+        type: string
+        default: ""
+      use-legacy-marketplace-path:
+        description: "Use legacy marketplace path (/var/www/glpi/marketplace) for v10.x builds"
+        required: false
+        type: boolean
+        default: false
+      no-cache:
+        description: "Skip build cache to force fresh base-image layers (used by security rebuilds)"
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      DOCKER_HUB_USERNAME:
+        required: true
+      DOCKER_HUB_TOKEN:
+        required: true
+      GHCR_USERNAME:
+        required: true
+      GHCR_ACCESS_TOKEN:
+        required: true
+
+  # CI: Test build on workflow changes (images are not pushed to docker registries)
+  push:
+    branches:
+      - "main"
+    paths:
+      - ".github/workflows/glpi.yml"
+      - "glpi/**"
+  pull_request:
+    paths:
+      - ".github/workflows/glpi.yml"
+      - "glpi/**"
+
+  # Manual builds
+  # Can be triggered by curl:
+  # curl -X POST \
+  # -H "Accept: application/vnd.github.v3+json" \
+  # -H "Authorization: <access-token>" \
+  # https://api.github.com/repos/glpi-project/docker-images/actions/workflows/<workflow-id>/dispatches \
+  # -d '{"ref":"main", "inputs": { "glpi-version":"11.0.5", "push": true }}'
+  workflow_dispatch:
+    inputs:
+      push:
+        description: "Whether to push images to registries"
+        required: false
+        type: boolean
+        default: false
+      php-version:
+        description: "PHP version to use for the build"
+        required: false
+        type: string
+        default: "8.5"
+      glpi-repo:
+        description: "GitHub repository to download GLPI from (owner/repo)"
+        required: false
+        type: string
+        default: "glpi-project/glpi"
+      glpi-version:
+        description: "GLPI version (tag: '11.0.5'), branch ('main', '11.0/bugfixes'), commit hash, or URL"
+        required: true
+        type: string
+      image-tag:
+        description: "Override image tag (glpi-version otherwise). i.e: '12.0.0-prebuild-20260615-1'"
+        required: false
+        type: string
+        default: ""
+      patch-url:
+        description: "Optional patch URL(s) to apply. Multiple patches: separate with spaces"
+        required: false
+        type: string
+        default: ""
+      use-legacy-marketplace-path:
+        description: "Use legacy marketplace path (/var/www/glpi/marketplace) for v10.x builds"
+        required: false
+        type: boolean
+        default: false
+      no-cache:
+        description: "Skip build cache to force fresh base-image layers (used by security rebuilds)"
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  prepare:
+    name: "Prepare"
+    runs-on: "ubuntu-latest"
+    outputs:
+      artifact-prefix: ${{ steps.set-vars.outputs.artifact_prefix }}
+      is-latest: ${{ steps.set-vars.outputs.is_latest }}
+      is-latest-major: ${{ steps.set-vars.outputs.is_latest_major }}
+      cache-key: ${{ steps.set-vars.outputs.cache_key }}
+      image-version: ${{ steps.set-vars.outputs.image_version }}
+      # Unified inputs for all trigger types
+      glpi-repo: ${{ steps.set-vars.outputs.glpi_repo }}
+      glpi-version: ${{ steps.set-vars.outputs.glpi_version }}
+      php-version: ${{ steps.set-vars.outputs.php_version }}
+      patch-url: ${{ steps.set-vars.outputs.patch_url }}
+      image-tag: ${{ steps.set-vars.outputs.image_tag }}
+      push: ${{ steps.set-vars.outputs.push }}
+      marketplace-dir: ${{ steps.set-vars.outputs.marketplace_dir }}
+    steps:
+      - name: "Set variables"
+        id: "set-vars"
+        uses: "actions/github-script@v9"
+        env:
+          # Use inputs when provided, otherwise use defaults (for push/pull_request on this repo)
+          GLPI_REPO: ${{ vars.GLPI_REPO || inputs.glpi-repo || 'glpi-project/glpi' }}
+          GLPI_VERSION: ${{ inputs.glpi-version || 'main' }}
+          PHP_VERSION: ${{ inputs.php-version || '8.5' }}
+          PUSH: ${{ inputs.push || 'false' }}
+          PATCH_URL: ${{ inputs.patch-url || '' }}
+          IMAGE_TAG: ${{ inputs.image-tag || '' }}
+          USE_LEGACY_MP_PATH: ${{ inputs.use-legacy-marketplace-path || 'false' }}
+        with:
+          script: |
+            const glpiRepo    = process.env.GLPI_REPO
+            const glpiVersion = process.env.GLPI_VERSION
+            const imageTag    = process.env.IMAGE_TAG
+
+            const [owner, repo] = glpiRepo.split('/')
+
+            // Static outputs
+            core.setOutput('glpi_repo',    glpiRepo)
+            core.setOutput('glpi_version', glpiVersion)
+            core.setOutput('php_version',  process.env.PHP_VERSION)
+            core.setOutput('push',         process.env.PUSH)
+            core.setOutput('patch_url',    process.env.PATCH_URL)
+            core.setOutput('image_tag',    imageTag)
+            core.setOutput('marketplace_dir',
+              process.env.USE_LEGACY_MP_PATH === 'true'
+                ? '/var/www/glpi/marketplace'
+                : '/var/glpi/marketplace'
+            )
+
+            // Sanitize version string for use as an artifact/image name
+            const sanitize = s => s.replace(/[/:]/g, '-').replace(/^https?--/, '')
+            core.setOutput('artifact_prefix', imageTag || sanitize(glpiVersion))
+            core.setOutput('image_version',   imageTag || sanitize(glpiVersion))
+
+            // Semver detection (e.g. 10.0.18, 11.0.5-rc1) vs branch/commit/URL
+            const isSemver = /^\d+\.\d+\.\d+(-\w+)?$/.test(glpiVersion)
+
+            // Cache key: ties a build to a specific commit SHA so unchanged sources hit the cache
+            if (/^https?:\/\//.test(glpiVersion)) {
+              // URLs: content can change without a new tag, so always force a rebuild
+              core.setOutput('cache_key', require('crypto').randomBytes(20).toString('hex'))
+            } else if (glpiVersion === 'latest') {
+              const { data: rel } = await github.rest.repos.getLatestRelease({ owner, repo })
+              core.info(`Resolved "latest" to ${rel.tag_name}`)
+              const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: rel.tag_name })
+              core.setOutput('cache_key', commit.sha)
+            } else {
+              const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref: glpiVersion })
+              core.setOutput('cache_key', commit.sha ?? '')
+            }
+
+            // No latest-tag checks for explicit image-tag overrides or non-semver inputs
+            if (imageTag || !isSemver) {
+              core.setOutput('is_latest',       'false')
+              core.setOutput('is_latest_major', 'false')
+              return
+            }
+
+            // Prereleases (e.g. 11.0.5-rc1) also skip the latest checks
+            if (/-\w+$/.test(glpiVersion)) {
+              core.setOutput('is_latest',       'false')
+              core.setOutput('is_latest_major', 'false')
+              return
+            }
+
+            // Latest release overall
+            const { data: latestRelease } = await github.rest.repos.getLatestRelease({ owner, repo })
+            const isLatest = glpiVersion === latestRelease.tag_name
+            core.info(`Latest release: ${latestRelease.tag_name} — is_latest=${isLatest}`)
+            core.setOutput('is_latest', isLatest ? 'true' : 'false')
+
+            // Latest in its major
+            const allReleases = await github.paginate(github.rest.repos.listReleases, { owner, repo, per_page: 100 })
+            const major = glpiVersion.split('.')[0]
+            const latestInMajor = allReleases
+              .filter(r => !r.prerelease && r.tag_name.startsWith(major + '.'))
+              .map(r => r.tag_name)[0] ?? ''
+            const isLatestMajor = glpiVersion === latestInMajor
+            core.info(`Latest in ${major}.x : ${latestInMajor || '(none)'} — is_latest_major=${isLatestMajor}`)
+            core.setOutput('is_latest_major', isLatestMajor ? 'true' : 'false')
+
+  build:
+    name: "Build [${{ matrix.platform.suffix }}]"
+    runs-on: "${{ matrix.platform.runner }}"
+    needs: [prepare]
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - { arch: "linux/amd64", runner: "ubuntu-24.04", suffix: "amd64" }
+          - { arch: "linux/arm64", runner: "ubuntu-24.04-arm", suffix: "arm64" }
+    steps:
+      - name: "Checkout"
+        uses: "actions/checkout@v7"
+        with:
+          repository: ${{ env.DOCKER_IMAGES_REPO }}
+
+      - name: "Prepare environment"
+        run: |
+          platform="${{ matrix.platform.arch }}"
+          echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
+
+      - name: "Docker metadata"
+        id: "meta"
+        uses: "docker/metadata-action@v6"
+        with:
+          images: |
+            ${{ env.DOCKERHUB_IMAGE }}
+            ${{ env.GHCR_IMAGE }}
+
+      - name: "Set up QEMU"
+        uses: "docker/setup-qemu-action@v4"
+
+      - name: "Set up Docker Buildx"
+        uses: "docker/setup-buildx-action@v4"
+
+      - name: "Login to DockerHub"
+        if: ${{ needs.prepare.outputs.push == 'true' }}
+        uses: "docker/login-action@v4"
+        with:
+          username: "${{ secrets.DOCKER_HUB_USERNAME }}"
+          password: "${{ secrets.DOCKER_HUB_TOKEN }}"
+
+      - name: "Login to Github container registry"
+        if: ${{ needs.prepare.outputs.push == 'true' }}
+        uses: "docker/login-action@v4"
+        with:
+          registry: "ghcr.io"
+          username: "${{ secrets.GHCR_USERNAME }}"
+          password: "${{ secrets.GHCR_ACCESS_TOKEN }}"
+
+      - name: "Build and push by digest"
+        id: "build"
+        uses: "docker/build-push-action@v7"
+        env:
+          DOCKER_BUILD_SUMMARY: ${{ runner.debug == '1' }}
+        with:
+          build-args: |
+            GLPI_REPO=${{ needs.prepare.outputs.glpi-repo }}
+            GLPI_VERSION=${{ needs.prepare.outputs.glpi-version }}
+            GLPI_PATCH_URL=${{ needs.prepare.outputs.patch-url }}
+            GLPI_CACHE_KEY=${{ needs.prepare.outputs.cache-key }}
+            GLPI_MARKETPLACE_DIR=${{ needs.prepare.outputs.marketplace-dir }}
+            BUILDER_IMAGE=php:${{ needs.prepare.outputs.php-version }}-cli-alpine
+            APP_IMAGE=php:${{ needs.prepare.outputs.php-version }}-apache
+          no-cache: ${{ inputs.no-cache || false }}
+          cache-from: ${{ (!inputs.no-cache && format('type=gha,scope={0}-{1}\ntype=gha,scope=main-{1}', needs.prepare.outputs.cache-key, matrix.platform.suffix)) || '' }}
+          cache-to: ${{ (!inputs.no-cache && format('type=gha,mode=max,scope={0}-{1}', needs.prepare.outputs.cache-key, matrix.platform.suffix)) || '' }}
+          context: "glpi"
+          labels: "${{ steps.meta.outputs.labels }}"
+          platforms: "${{ matrix.platform.arch }}"
+          pull: true
+          sbom: ${{ needs.prepare.outputs.push == 'true' }}
+          provenance: ${{ needs.prepare.outputs.push == 'true' && 'mode=max' || 'false' }}
+          outputs: "type=image,\"name=${{ env.DOCKERHUB_IMAGE }},${{ env.GHCR_IMAGE }}\",push-by-digest=true,name-canonical=true,push=${{ needs.prepare.outputs.push }}"
+
+      - name: "Export digest"
+        if: ${{ needs.prepare.outputs.push == 'true' }}
+        run: |
+          mkdir -p ${{ runner.temp }}/digests
+          digest="${{ steps.build.outputs.digest }}"
+          touch "${{ runner.temp }}/digests/${digest#sha256:}-${{ matrix.platform.suffix }}"
+
+      - name: "Upload digest"
+        if: ${{ needs.prepare.outputs.push == 'true' }}
+        uses: "actions/upload-artifact@v7"
+        with:
+          name: "digests-${{ needs.prepare.outputs.artifact-prefix }}-${{ env.PLATFORM_PAIR }}"
+          path: "${{ runner.temp }}/digests/*"
+          if-no-files-found: "error"
+          retention-days: 1
+
+  merge-manifests:
+    name: "Merge manifests"
+    runs-on: "ubuntu-latest"
+    needs: [prepare, build]
+    if: ${{ needs.prepare.outputs.push == 'true' }}
+    steps:
+      - name: "Download digests"
+        uses: "actions/download-artifact@v8"
+        with:
+          path: "${{ runner.temp }}/digests"
+          pattern: "digests-${{ needs.prepare.outputs.artifact-prefix }}-*"
+          merge-multiple: true
+      - name: "Verify digests"
+        run: |
+          mkdir -p "${{ runner.temp }}/digests"
+          if [ -z "$(ls --almost-all ${{ runner.temp }}/digests)" ]; then
+            echo "::error::No digest files found! Build job may have failed or artifacts expired."
+            exit 1
+          fi
+      - name: "Set up Docker Buildx"
+        uses: "docker/setup-buildx-action@v4"
+      - name: "Login to DockerHub"
+        uses: "docker/login-action@v4"
+        with:
+          username: "${{ secrets.DOCKER_HUB_USERNAME }}"
+          password: "${{ secrets.DOCKER_HUB_TOKEN }}"
+      - name: "Login to Github container registry"
+        uses: "docker/login-action@v4"
+        with:
+          registry: "ghcr.io"
+          username: "${{ secrets.GHCR_USERNAME }}"
+          password: "${{ secrets.GHCR_ACCESS_TOKEN }}"
+      - name: "Docker metadata"
+        id: "meta"
+        uses: "docker/metadata-action@v6"
+        with:
+          images: |
+            ${{ env.DOCKERHUB_IMAGE }}
+            ${{ env.GHCR_IMAGE }}
+          # Disable automatic latest tag - we control it via is-latest
+          flavor: |
+            latest=false
+          tags: |
+            # If image-tag is explicitly provided, use it directly
+            type=raw,value=${{ needs.prepare.outputs.image-tag }},enable=${{ needs.prepare.outputs.image-tag != '' }}
+            # Base version tag (always, when no explicit image-tag)
+            type=raw,value=${{ needs.prepare.outputs.image-version }},enable=${{ needs.prepare.outputs.image-tag == '' }}
+
+            # Only for releases
+            type=semver,pattern={{major}},value=${{ needs.prepare.outputs.glpi-version }},enable=${{ needs.prepare.outputs.is-latest-major == 'true' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ needs.prepare.outputs.glpi-version }},enable=${{ needs.prepare.outputs.is-latest-major == 'true' }}
+
+            # Latest
+            type=raw,value=latest,enable=${{ needs.prepare.outputs.is-latest == 'true' }}
+      - name: "Create and push manifest"
+        working-directory: "${{ runner.temp }}/digests"
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          # Read digest files (named like <hash>-<arch>) and prepare source arrays
+          DOCKERHUB_SOURCES=""
+          GHCR_SOURCES=""
+          for file_path in "$PWD"/*; do
+            file_name="${file_path##*/}"
+            hash="${file_name%%-*}"
+            DOCKERHUB_SOURCES="$DOCKERHUB_SOURCES ${{ env.DOCKERHUB_IMAGE }}@sha256:$hash"
+            GHCR_SOURCES="$GHCR_SOURCES ${{ env.GHCR_IMAGE }}@sha256:$hash"
+          done
+
+          # Create manifest for DockerHub
+          DOCKERHUB_TAGS=$(echo "$TAGS" | grep "^${{ env.DOCKERHUB_IMAGE }}" | xargs --replace={} echo "-t {}" | tr '\n' ' ')
+          if [[ -n "$DOCKERHUB_TAGS" ]]; then
+            echo "Creating DockerHub manifest..."
+            docker buildx imagetools create $DOCKERHUB_TAGS $DOCKERHUB_SOURCES
+          fi
+
+          # Create manifest for GHCR
+          GHCR_TAGS=$(echo "$TAGS" | grep "^${{ env.GHCR_IMAGE }}" | xargs --replace={} echo "-t {}" | tr '\n' ' ')
+          if [[ -n "$GHCR_TAGS" ]]; then
+            echo "Creating GHCR manifest..."
+            docker buildx imagetools create $GHCR_TAGS $GHCR_SOURCES
+          fi
+      - name: "Job summary"
+        uses: "actions/github-script@v9"
+        env:
+          DIGESTS_PATH: ${{ runner.temp }}/digests
+          META_TAGS: ${{ steps.meta.outputs.tags }}
+          DOCKERHUB_IMAGE: ${{ env.DOCKERHUB_IMAGE }}
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            const digestsDir = process.env.DIGESTS_PATH;
+            const tags = process.env.META_TAGS.split('\n').filter(Boolean);
+            const dockerhubImage = process.env.DOCKERHUB_IMAGE;
+
+            // Read per-platform digests from artifact files
+            const digestFiles = fs.readdirSync(digestsDir);
+            const digests = digestFiles.map(f => {
+              const parts = f.split('-');
+              return {
+                hash: `sha256:${parts[0]}`,
+                arch: parts.length > 1 ? parts.slice(1).join('-') : 'unknown'
+              };
+            });
+
+            // Build summary
+            let summary = '## 🐳 Docker Image Published\n\n';
+
+            // Tags table
+            summary += '### Tags\n\n';
+            summary += '| Registry | Tag |\n';
+            summary += '|:---------|:----|\n';
+            for (const tag of tags) {
+              const registry = tag.startsWith('ghcr.io') ? 'GHCR' : 'Docker Hub';
+              summary += `| ${registry} | \`${tag}\` |\n`;
+            }
+
+            // Digests table
+            summary += '\n### Image Digests\n\n';
+            summary += '> Use these digests to pin a specific build and rollback if a future release causes issues.\n\n';
+            summary += '| Architecture | Digest |\n';
+            summary += '|:-------------|:-------|\n';
+            for (const digest of digests) {
+              summary += `| \`${digest.arch}\` | \`${digest.hash}\` |\n`;
+            }
+
+            // Pull by digest examples
+            summary += '\n### Pull by Digest\n\n';
+            summary += '```bash\n';
+            for (const digest of digests) {
+              summary += `# Pull ${digest.arch} image\n`;
+              summary += `docker pull ${dockerhubImage}@${digest.hash}\n`;
+            }
+            summary += '```\n';
+
+            await core.summary.addRaw(summary).write();

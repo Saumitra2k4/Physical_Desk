@@ -1,0 +1,81 @@
+name: "GLPI Github Actions GLPI/Apache images"
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - ".github/workflows/githubactions-glpi-apache.yml"
+      - "githubactions-glpi-apache/**"
+  pull_request:
+    paths:
+      - ".github/workflows/githubactions-glpi-apache.yml"
+      - "githubactions-glpi-apache/**"
+  schedule:
+    - cron: '0 22 * * *'
+  # Enable manual run
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: "ubuntu-latest"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {glpi-branch: "10.0/bugfixes", glpi-version: "10.0.x", php-version: "7.4"}
+          - {glpi-branch: "10.0/bugfixes", glpi-version: "10.0.x", php-version: "8.0"}
+          - {glpi-branch: "10.0/bugfixes", glpi-version: "10.0.x", php-version: "8.1"}
+          - {glpi-branch: "10.0/bugfixes", glpi-version: "10.0.x", php-version: "8.2"}
+          - {glpi-branch: "10.0/bugfixes", glpi-version: "10.0.x", php-version: "8.3"}
+          - {glpi-branch: "10.0/bugfixes", glpi-version: "10.0.x", php-version: "8.4"}
+          - {glpi-branch: "10.0/bugfixes", glpi-version: "10.0.x", php-version: "8.5"}
+          - {glpi-branch: "11.0/bugfixes", glpi-version: "11.0.x", php-version: "8.2"}
+          - {glpi-branch: "11.0/bugfixes", glpi-version: "11.0.x", php-version: "8.3"}
+          - {glpi-branch: "11.0/bugfixes", glpi-version: "11.0.x", php-version: "8.4"}
+          - {glpi-branch: "11.0/bugfixes", glpi-version: "11.0.x", php-version: "8.5", latest: true}
+          - {glpi-branch: "main", glpi-version: "12.0.x", php-version: "8.3"}
+          - {glpi-branch: "main", glpi-version: "12.0.x", php-version: "8.4"}
+          - {glpi-branch: "main", glpi-version: "12.0.x", php-version: "8.5"}
+    steps:
+      - name: "Set variables"
+        run: |
+          OUTPUTS="type=image"
+          if [[ "${{ github.ref }}" = 'refs/heads/main' && "${{ github.repository }}" = 'glpi-project/docker-images' ]]; then
+              OUTPUTS="$OUTPUTS,push=true"
+          fi
+          echo "OUTPUTS=$OUTPUTS" >> $GITHUB_ENV
+      - name: "Checkout"
+        uses: "actions/checkout@v7"
+      - name: "Set up Docker Buildx"
+        uses: "docker/setup-buildx-action@v4"
+      - name: "Login to DockerHub"
+        uses: "docker/login-action@v4"
+        with:
+          username: "${{ secrets.DOCKER_HUB_USERNAME }}"
+          password: "${{ secrets.DOCKER_HUB_TOKEN }}"
+      - name: "Login to Github container registry"
+        uses: "docker/login-action@v4"
+        with:
+          registry: "ghcr.io"
+          username: "${{ secrets.GHCR_USERNAME }}"
+          password: "${{ secrets.GHCR_ACCESS_TOKEN }}"
+      - name: "Generate tags"
+        id: tags
+        run: |
+          TAGS="ghcr.io/glpi-project/githubactions-glpi-apache:php-${{ matrix.php-version }}-glpi-${{ matrix.glpi-version }}"
+          if [[ "${{ matrix.latest }}" == "true" ]]; then
+            TAGS="${TAGS},ghcr.io/glpi-project/githubactions-glpi-apache:latest"
+          fi
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+      - name: "Build and push"
+        uses: "docker/build-push-action@v7"
+        with:
+          build-args: |
+            BASE_IMAGE=ghcr.io/glpi-project/githubactions-php-apache:${{ matrix.php-version }}
+            GLPI_BRANCH=${{ matrix.glpi-branch }}
+          no-cache: true
+          context: "githubactions-glpi-apache"
+          outputs: "${{ env.OUTPUTS }}"
+          pull: true
+          tags: "${{ steps.tags.outputs.tags }}"

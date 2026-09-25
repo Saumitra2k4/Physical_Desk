@@ -1,0 +1,96 @@
+#!/bin/bash
+set -e -u -o pipefail
+
+Install_GLPI() {
+    ssl_args=()
+    if [ "${GLPI_DB_SSL:-false}" = "true" ]; then
+        ssl_args+=(--db-ssl)
+        [ -n "${GLPI_DB_SSL_CA:-}"     ] && ssl_args+=(--db-ssl-ca="$GLPI_DB_SSL_CA")
+        [ -n "${GLPI_DB_SSL_CERT:-}"   ] && ssl_args+=(--db-ssl-cert="$GLPI_DB_SSL_CERT")
+        [ -n "${GLPI_DB_SSL_KEY:-}"    ] && ssl_args+=(--db-ssl-key="$GLPI_DB_SSL_KEY")
+        [ -n "${GLPI_DB_SSL_CAPATH:-}" ] && ssl_args+=(--db-ssl-capath="$GLPI_DB_SSL_CAPATH")
+        [ -n "${GLPI_DB_SSL_CIPHER:-}" ] && ssl_args+=(--db-ssl-cipher="$GLPI_DB_SSL_CIPHER")
+    fi
+
+    bin/console database:install \
+        --db-host="$GLPI_DB_HOST" \
+        --db-port="$GLPI_DB_PORT" \
+        --db-name="$GLPI_DB_NAME" \
+        --db-user="$GLPI_DB_USER" \
+        --db-password="$GLPI_DB_PASSWORD" \
+        "${ssl_args[@]}" \
+        --no-interaction --quiet
+}
+
+greetings() {
+    local new_installation="$1"
+
+    echo $'\n\n================================================================'
+    echo $'Welcome to\n'
+    echo $' ██████╗ ██╗     ██████╗ ██╗'
+    echo $'██╔════╝ ██║     ██╔══██╗██║'
+    echo $'██║  ███╗██║     ██████╔╝██║'
+    echo $'██║   ██║██║     ██╔═══╝ ██║'
+    echo $'╚██████╔╝███████╗██║     ██║'
+    echo $' ╚═════╝ ╚══════╝╚═╝     ╚═╝\n'
+
+    echo $'https://glpi-project.org'
+
+    if [ "$new_installation" = true ]; then
+        echo $'\n================================================================'
+        echo $'GLPI installation completed successfully!\n'
+        echo $'Please access GLPI via your web browser to complete the setup.'
+        echo $'You can use the following credentials:\n'
+        echo $'- Username: glpi'
+        echo $'- Password: glpi'
+        echo $'================================================================\n'
+    fi
+}
+
+Update_GLPI() {
+    bin/console database:update --no-interaction --quiet
+}
+
+GLPI_Installed() {
+    if [ -f "${GLPI_CONFIG_DIR}/config_db.php" ]; then
+        bin/console db:check --quiet
+        # GLPI error code for db:check command:
+        # 0: Everything is ok
+        # 1-4: Warnings related to sql diffs (not critical)
+        # 5: Database connection error
+        # 6: version cannot be found
+        # 7: no tables found
+        # if the command above return an error below 5, GLPI is ok and we can return 0
+        if [ $? -lt 5 ]; then
+            return 0
+        fi
+    fi
+
+    # If the config_db.php file does not exist or there is something wrong with the database,
+    # GLPI is not installed
+    return 1
+}
+
+# Skipping auto stuff, database configuration is not fully provided
+if [ -z "${GLPI_DB_HOST:-}" ] || [ -z "${GLPI_DB_PORT:-}" ] || [ -z "${GLPI_DB_NAME:-}" ] || [ -z "${GLPI_DB_USER:-}" ] || [ -z "${GLPI_DB_PASSWORD:-}" ]; then
+    if ! $GLPI_SKIP_AUTOINSTALL || ! $GLPI_SKIP_AUTOUPDATE; then
+        echo "Database configuration incomplete, forcing GLPI_SKIP_AUTOINSTALL and GLPI_SKIP_AUTOUPDATE to true."
+    fi
+    GLPI_SKIP_AUTOINSTALL=true
+    GLPI_SKIP_AUTOUPDATE=true
+fi
+
+if ! GLPI_Installed; then
+    if ! $GLPI_SKIP_AUTOINSTALL; then
+        echo "GLPI is not installed. but auto-install is enabled. Starting installation."
+        echo "Please wait until you see the greeting, this may take a minute..."
+        Install_GLPI
+        greetings true
+    fi
+else
+    if ! $GLPI_SKIP_AUTOUPDATE; then
+        echo "GLPI is installed, and auto-update is enabled. Starting update..."
+        Update_GLPI
+        greetings false
+    fi
+fi

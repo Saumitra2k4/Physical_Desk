@@ -1,0 +1,286 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260926051848
+Username: DESKTOP-JKQ8KBN\Admin
+RunAs User: DESKTOP-JKQ8KBN\Admin
+Configuration Name: 
+Machine: DESKTOP-JKQ8KBN (Microsoft Windows NT 10.0.22621.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 17372
+PSVersion: 5.1.22621.4249
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.4249
+BuildVersion: 10.0.22621.4249
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is C:\Users\Admin\Desktop\Physical Desk\engineering_logs\20260926_051848_AWS_STAGING_PD57_CHECKPOINT_01_DISCOVERY.txt
+PS C:\Users\Admin> try {
+    Write-Host ""
+    Write-Host "============================================================"
+    Write-Host "PD57 AWS STAGING - CHECKPOINT AWS-01"
+    Write-Host "MODE=READ_ONLY_DISCOVERY"
+    Write-Host "DATE=$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss K')"
+    Write-Host "WORKSPACE=$Root"
+    Write-Host "============================================================"
+    Write-Host ""
+
+    Write-Host "COMMAND=aws --version"
+    aws --version
+    Write-Host "EXIT_CODE=$LASTEXITCODE"
+    Write-Host ""
+
+    Write-Host "COMMAND=AWS STS credential validation [identity details suppressed]"
+    try {
+        $IdentityJson = aws sts get-caller-identity --output json 2>&1
+
+        if ($LASTEXITCODE -eq 0) {
+            $null = $IdentityJson | ConvertFrom-Json
+            Write-Host "AWS_IDENTITY=PASS"
+            Write-Host "NOTE=Credentials are valid. Account identifiers intentionally not printed."
+        }
+        else {
+            Write-Host "AWS_IDENTITY=FAIL"
+            Write-Host $IdentityJson
+        }
+    }
+    catch {
+        Write-Host "AWS_IDENTITY=FAIL"
+        Write-Host $_
+    }
+
+    Write-Host ""
+
+    Write-Host "COMMAND=aws configure get region"
+    $ConfiguredRegion = (aws configure get region 2>&1 | Out-String).Trim()
+
+    if ([string]::IsNullOrWhiteSpace($ConfiguredRegion)) {
+        $Region = "ap-south-1"
+        Write-Host "CONFIGURED_REGION=NONE"
+        Write-Host "SELECTED_REGION=$Region"
+        Write-Host "REGION_REASON=No default region configured; using Mumbai region for PD57 staging discovery."
+    }
+    else {
+        Write-Host "CONFIGURED_REGION=$ConfiguredRegion"
+        $Region = "ap-south-1"
+        Write-Host "SELECTED_REGION=$Region"
+        Write-Host "REGION_REASON=PD57 staging is being evaluated in AWS Mumbai region."
+    }
+
+    Write-Host ""
+
+    Write-Host "COMMAND=aws lightsail get-regions --include-availability-zones --region $Region"
+    $RegionsRaw = aws lightsail get-regions --include-availability-zones --region $Region --output json 2>&1
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "LIGHTSAIL_API=PASS"
+
+        $Regions = $RegionsRaw | ConvertFrom-Json
+        $Mumbai = $Regions.regions | Where-Object { $_.name -eq $Region }
+
+        if ($null -ne $Mumbai) {
+            Write-Host "TARGET_REGION_AVAILABLE=PASS"
+            Write-Host "AVAILABLE_ZONES:"
+            $Mumbai.availabilityZones |
+                Where-Object { $_.state -eq "available" } |
+                Select-Object zoneName, state |
+                Format-Table -AutoSize
+        }
+        else {
+            Write-Host "TARGET_REGION_AVAILABLE=FAIL"
+        }
+    }
+    else {
+        Write-Host "LIGHTSAIL_API=FAIL"
+        Write-Host $RegionsRaw
+    }
+
+    Write-Host ""
+
+    Write-Host "COMMAND=aws lightsail get-instances --region $Region"
+    $InstancesRaw = aws lightsail get-instances --region $Region --output json 2>&1
+
+    if ($LASTEXITCODE -eq 0) {
+        $Instances = $InstancesRaw | ConvertFrom-Json
+
+        if ($Instances.instances.Count -eq 0) {
+            Write-Host "EXISTING_LIGHTSAIL_INSTANCES=NONE"
+        }
+        else {
+            Write-Host "EXISTING_LIGHTSAIL_INSTANCES:"
+            $Instances.instances |
+                Select-Object name,
+                              @{Name="State";Expression={$_.state.name}},
+                              blueprintId,
+                              bundleId,
+                              publicIpAddress,
+                              @{Name="AZ";Expression={$_.location.availabilityZone}} |
+                Format-Table -AutoSize
+        }
+    }
+    else {
+        Write-Host "GET_INSTANCES=FAIL"
+        Write-Host $InstancesRaw
+    }
+
+    Write-Host ""
+
+    Write-Host "COMMAND=aws lightsail get-blueprints --region $Region"
+    $BlueprintRaw = aws lightsail get-blueprints --region $Region --output json 2>&1
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "BLUEPRINT_DISCOVERY=PASS"
+
+        $BlueprintData = $BlueprintRaw | ConvertFrom-Json
+
+        Write-Host "ACTIVE_LINUX_OS_BLUEPRINTS:"
+        $BlueprintData.blueprints |
+            Where-Object {
+                $_.isActive -eq $true -and
+                $_.type -eq "os" -and
+                (
+                    $_.platform -eq "LINUX_UNIX" -or
+                    $_.name -match "Ubuntu"
+                )
+            } |
+            Select-Object blueprintId, name, version, platform |
+            Format-Table -AutoSize
+    }
+    else {
+        Write-Host "BLUEPRINT_DISCOVERY=FAIL"
+        Write-Host $BlueprintRaw
+    }
+
+    Write-Host ""
+
+    Write-Host "COMMAND=aws lightsail get-bundles --region $Region"
+    $BundleRaw = aws lightsail get-bundles --region $Region --output json 2>&1
+
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "BUNDLE_DISCOVERY=PASS"
+
+        $BundleData = $BundleRaw | ConvertFrom-Json
+
+        Write-Host "ACTIVE_LINUX_BUNDLES_2GB_TO_8GB:"
+        $BundleData.bundles |
+            Where-Object {
+                $_.isActive -eq $true -and
+                $_.supportedPlatforms -contains "LINUX_UNIX" -and
+                $_.ramSizeInGb -ge 2 -and
+                $_.ramSizeInGb -le 8
+            } |
+            Sort-Object ramSizeInGb, price |
+            Select-Object bundleId,
+                          name,
+                          cpuCount,
+                          ramSizeInGb,
+                          diskSizeInGb,
+                          price,
+                          transferPerMonthInGb |
+            Format-Table -AutoSize
+    }
+    else {
+        Write-Host "BUNDLE_DISCOVERY=FAIL"
+        Write-Host $BundleRaw
+    }
+
+    Write-Host ""
+    Write-Host "============================================================"
+    Write-Host "CHECKPOINT=AWS-01"
+    Write-Host "RESOURCE_CREATION=False"
+    Write-Host "APPLICATION_CHANGE=False"
+    Write-Host "DATABASE_CHANGE=False"
+    Write-Host "NEXT_ACTION=REVIEW_OUTPUT_BEFORE_CREATING_ANY_AWS_RESOURCE"
+    Write-Host "============================================================"
+}
+finally {
+    Stop-Transcript
+}
+
+============================================================
+PD57 AWS STAGING - CHECKPOINT AWS-01
+MODE=READ_ONLY_DISCOVERY
+DATE=2026-09-26 05:18:50 +05:30
+WORKSPACE=C:\Users\Admin\Desktop\Physical Desk
+============================================================
+
+COMMAND=aws --version
+
+EXIT_CODE=0
+
+COMMAND=AWS STS credential validation [identity details suppressed]
+AWS_IDENTITY=PASS
+NOTE=Credentials are valid. Account identifiers intentionally not printed.
+
+COMMAND=aws configure get region
+CONFIGURED_REGION=eu-north-1
+SELECTED_REGION=ap-south-1
+REGION_REASON=PD57 staging is being evaluated in AWS Mumbai region.
+
+COMMAND=aws lightsail get-regions --include-availability-zones --region ap-south-1
+LIGHTSAIL_API=PASS
+TARGET_REGION_AVAILABLE=PASS
+AVAILABLE_ZONES:
+
+zoneName    state
+--------    -----
+ap-south-1a available
+ap-south-1b available
+ap-south-1c available
+
+
+
+COMMAND=aws lightsail get-instances --region ap-south-1
+EXISTING_LIGHTSAIL_INSTANCES=NONE
+
+COMMAND=aws lightsail get-blueprints --region ap-south-1
+BLUEPRINT_DISCOVERY=PASS
+ACTIVE_LINUX_OS_BLUEPRINTS:
+
+blueprintId       name              version            platform
+-----------       ----              -------            --------
+amazon_linux_2023 Amazon Linux 2023 2023.12.20260918.0 LINUX_UNIX
+ubuntu_24_04      Ubuntu            24.04 LTS          LINUX_UNIX
+ubuntu_22_04      Ubuntu            22.04 LTS          LINUX_UNIX
+debian_13         Debian            13.6               LINUX_UNIX
+debian_12         Debian            12.15              LINUX_UNIX
+freebsd_15        FreeBSD           15.1               LINUX_UNIX
+freebsd_14        FreeBSD           14.4               LINUX_UNIX
+opensuse_16       openSUSE          16.0               LINUX_UNIX
+alma_linux_9      AlmaLinux         9.7                LINUX_UNIX
+centos_stream_9   CentOS            CS9-20230110       LINUX_UNIX
+
+
+
+COMMAND=aws lightsail get-bundles --region ap-south-1
+BUNDLE_DISCOVERY=PASS
+ACTIVE_LINUX_BUNDLES_2GB_TO_8GB:
+
+bundleId          name   cpuCount ramSizeInGb diskSizeInGb price transferPerMonthInGb
+--------          ----   -------- ----------- ------------ ----- --------------------
+small_ipv6_3_1    Small         2         2.0           60  10.0                 1536
+small_3_1         Small         2         2.0           60  12.0                 1536
+medium_ipv6_3_1   Medium        2         4.0           80  20.0                 2048
+medium_3_1        Medium        2         4.0           80  24.0                 2048
+c_large_ipv6_1_1  Large         2         4.0          160  38.0                 2560
+c_large_1_1       Large         2         4.0          160  42.0                 2560
+large_ipv6_3_1    Large         2         8.0          160  40.0                 2560
+large_3_1         Large         2         8.0          160  44.0                 2560
+c_xlarge_ipv6_1_1 Xlarge        4         8.0          320  80.0                 3072
+c_xlarge_1_1      Xlarge        4         8.0          320  84.0                 3072
+
+
+
+============================================================
+CHECKPOINT=AWS-01
+RESOURCE_CREATION=False
+APPLICATION_CHANGE=False
+DATABASE_CHANGE=False
+NEXT_ACTION=REVIEW_OUTPUT_BEFORE_CREATING_ANY_AWS_RESOURCE
+============================================================
+**********************
+Windows PowerShell transcript end
+End time: 20260926051917
+**********************

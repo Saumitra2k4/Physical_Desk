@@ -1,0 +1,67 @@
+name: "Github actions PHP images"
+
+on:
+  push:
+    branches:
+      - "main"
+    paths:
+      - ".github/workflows/githubactions-php.yml"
+      - "githubactions-php/**"
+  pull_request:
+    paths:
+      - ".github/workflows/githubactions-php.yml"
+      - "githubactions-php/**"
+  schedule:
+    - cron:  '0 0 * * 1'
+  # Enable manual run
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: "ubuntu-latest"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {base-image: "php:7.4-fpm-bullseye", php-version: "7.4"}
+          - {base-image: "php:8.0-fpm-bullseye", php-version: "8.0"}
+          - {base-image: "php:8.1-fpm-trixie", php-version: "8.1"}
+          - {base-image: "php:8.2-fpm-trixie", php-version: "8.2"}
+          - {base-image: "php:8.3-fpm-trixie", php-version: "8.3"}
+          - {base-image: "php:8.4-fpm-trixie", php-version: "8.4"}
+          - {base-image: "php:8.5-fpm-trixie", php-version: "8.5"}
+          - {base-image: "php:8.6-rc-fpm-trixie", php-version: "8.6"}
+    steps:
+      - name: "Set variables"
+        run: |
+          OUTPUTS="type=image"
+          if [[ "${{ github.ref }}" = 'refs/heads/main' && "${{ github.repository }}" = 'glpi-project/docker-images' ]]; then
+              OUTPUTS="$OUTPUTS,push=true"
+          fi
+          echo "OUTPUTS=$OUTPUTS" >> $GITHUB_ENV
+      - name: "Checkout"
+        uses: "actions/checkout@v7"
+      - name: "Set up Docker Buildx"
+        uses: "docker/setup-buildx-action@v4"
+      - name: "Login to DockerHub"
+        uses: "docker/login-action@v4"
+        with:
+          username: "${{ secrets.DOCKER_HUB_USERNAME }}"
+          password: "${{ secrets.DOCKER_HUB_TOKEN }}"
+      - name: "Login to Github container registry"
+        uses: "docker/login-action@v4"
+        with:
+          registry: "ghcr.io"
+          username: "${{ secrets.GHCR_USERNAME }}"
+          password: "${{ secrets.GHCR_ACCESS_TOKEN }}"
+      - name: "Build and push"
+        uses: "docker/build-push-action@v7"
+        with:
+          build-args: |
+            BASE_IMAGE=${{ matrix.base-image }}
+          cache-from: "type=gha"
+          cache-to: "type=gha,mode=max"
+          context: "githubactions-php"
+          outputs: "${{ env.OUTPUTS }}"
+          pull: true
+          tags: "ghcr.io/glpi-project/githubactions-php:${{ matrix.php-version }}"

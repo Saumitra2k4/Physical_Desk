@@ -1,0 +1,45 @@
+#!/bin/bash
+set -e -u -o pipefail
+
+# Wait for database to be ready before proceeding
+# Uses PHP mysqli to check database connectivity
+# Usage: wait-for-db.sh [caller_name]
+
+caller="${1:-unknown}"
+
+# Skip if database configuration is not fully provided
+if [ -z "${GLPI_DB_HOST:-}" ] || [ -z "${GLPI_DB_PORT:-}" ] || [ -z "${GLPI_DB_NAME:-}" ] || [ -z "${GLPI_DB_USER:-}" ] || [ -z "${GLPI_DB_PASSWORD:-}" ]; then
+    echo "[$caller] Database ENV configuration incomplete, skipping database state checks."
+    exit 0
+fi
+
+echo "[$caller] Waiting for database to be ready..."
+attempts_left=120
+
+until [ $attempts_left -eq 0 ]; do
+    # Try a simple database connection check using PHP mysqli
+    if php -r "
+        \$conn = @new mysqli();
+        if ('${GLPI_DB_SSL:-false}' === 'true') {
+            \$conn->ssl_set(
+                '${GLPI_DB_SSL_KEY:-}'    ?: null,
+                '${GLPI_DB_SSL_CERT:-}'   ?: null,
+                '${GLPI_DB_SSL_CA:-}'     ?: null,
+                '${GLPI_DB_SSL_CAPATH:-}' ?: null,
+                '${GLPI_DB_SSL_CIPHER:-}' ?: null
+            );
+        }
+        @\$conn->real_connect('$GLPI_DB_HOST', '$GLPI_DB_USER', '$GLPI_DB_PASSWORD', '', (int) '$GLPI_DB_PORT');
+        exit(\$conn->connect_error ? 1 : 0);
+    " 2>/dev/null; then
+        echo "[$caller] The database is now ready and reachable."
+        exit 0
+    fi
+
+    sleep 1
+    attempts_left=$((attempts_left - 1))
+    echo "[$caller] Still waiting for database to be ready... $attempts_left attempts left."
+done
+
+echo "[$caller] The database is not up or not reachable."
+exit 1

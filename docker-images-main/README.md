@@ -1,0 +1,241 @@
+# GLPI Docker Images
+
+[![Release Build](https://github.com/glpi-project/docker-images/actions/workflows/glpi.yml/badge.svg)](https://github.com/glpi-project/docker-images/actions/workflows/glpi.yml)
+
+![GLPI on docker illustration](https://raw.githubusercontent.com/glpi-project/docker-images/refs/heads/main/docs/illustration.png)
+
+[GLPI](https://glpi-project.org) is a free and open source Asset and IT Management Software package, Data center management, ITIL Service Desk, licenses tracking and software auditing.
+
+A few links:
+
+- [Report an issue](https://github.com/glpi-project/glpi/issues/new?template=bug_report.yml)
+- [Documentation](https://glpi-project.org/documentation/)
+- [Contributing](CONTRIBUTING.md)
+
+
+This repository contains build files for docker images available in [Github Container Registry](https://github.com/orgs/glpi-project/packages?ecosystem=container) and [Docker hub](https://hub.docker.com/r/glpi/glpi).
+
+## Summary
+
+- [How to use this image](#how-to-use-this-image)
+  - [via docker compose](#via-docker-compose)
+  - [via Podman](#via-podman)
+- [Timezones support](#timezones-support)
+- [Volumes](#volumes)
+- [Custom PHP configuration](#custom-php-configuration)
+- [Managing Cron tasks](#managing-cron-tasks)
+- [Adding custom Cron tasks](#adding-custom-cron-tasks)
+- [Environment variables](#environment-variables)
+- [Image Maintenance Policy](#image-maintenance-policy)
+
+## How to use this image
+
+### via [docker compose](https://github.com/docker/compose)
+
+This repository includes ready-to-use [`docker-compose.example.yml`](https://github.com/glpi-project/docker-images/blob/main/docker-compose.example.yml) and [`.env.example`](https://github.com/glpi-project/docker-images/blob/main/.env.example) files.
+
+Copy them to your working directory:
+
+```bash
+curl --fail https://raw.githubusercontent.com/glpi-project/docker-images/main/docker-compose.example.yml --output docker-compose.yml
+curl --fail https://raw.githubusercontent.com/glpi-project/docker-images/main/.env.example --output .env
+```
+
+Then launch it with:
+
+```bash
+docker compose up -d
+```
+
+Please note that we setup a random root password for the MySQL database, so you will need to check the logs of the `db` container to find it:
+
+```bash
+docker logs <db_container_id>
+```
+
+Once the containers are running, you can access GLPI at `http://localhost`
+GLPI will automatically install or update itself if needed.
+
+You can disable this behavior by setting the environment variable `GLPI_SKIP_AUTOINSTALL` to `true` in the `.env` file. Same with `GLPI_SKIP_AUTOUPDATE` to disable automatic updates.
+
+If so, when accessing the web interface, installation wizard will ask you to provide the database connection details. You can use the following credentials:
+
+- Hostname: `db`
+- Database: `glpi`
+- User: `glpi`
+- Password: `glpi`
+
+### via [Podman](https://podman.io/)
+
+The same `docker-compose.yml` and `.env` files from the docker compose example work with Podman. Use either `podman compose` (Podman 4.7+) or the standalone [`podman-compose`](https://github.com/containers/podman-compose) tool:
+
+```bash
+podman compose up -d
+```
+
+> **Rootless Podman note:** when running without root privileges, binding to port 80 may fail. Either change the host port to an unprivileged one (e.g. `8080:80`), or allow unprivileged port binding:
+> ```bash
+> sudo sysctl net.ipv4.ip_unprivileged_port_start=80
+> ```
+
+To check logs:
+
+```bash
+podman logs <db_container_id>
+```
+
+To run commands on a running container:
+
+```bash
+podman exec -it <glpi_container_id> /var/www/glpi/bin/console database:enable_timezones
+```
+
+### Timezones support
+
+If you want to initialize the timezones support for GLPI, we need to first GRANT the glpi user to access the `mysql.time_zone` table. So with the docker container running, you can run the following command:
+
+```bash
+docker exec -it <db_container_id> mysql -u root -p -e "GRANT SELECT ON mysql.time_zone_name TO 'glpi'@'%';FLUSH PRIVILEGES;"
+```
+The root password will be the one you found in the logs of the `db` container previously.
+
+Then you can run the following command to initialize the timezones on the GLPI container:
+
+```bash
+docker exec -it <glpi_container_id> /var/www/glpi/bin/console database:enable_timezones
+```
+
+### Volumes
+
+By default, the `glpi/glpi` image provides a volume containing its `config`, `marketplace` and `files` directories.
+
+For GLPI 10.0.x version the marketplace directory is not declared in the volume as the path differs. You may want to create a manual volume for the path `/var/www/glpi/marketplace` if you plan to use it.  
+If you are building your own GLPI 10.0.x image using the `glpi/Dockerfile` file, you have to specify the marketplace path using the `--build-arg GLPI_MARKETPLACE_DIR=/var/www/glpi/marketplace` option.
+
+You can also mount a volume containing your own custom plugins in `/var/www/glpi/plugins`.
+
+### Custom PHP configuration
+The following example sets the memory limit to 256M
+
+1. Create an ini file  
+   **custom-config.ini**
+   ```ini
+   memory_limit = 256M
+   ```
+2. Update the volumes configuration
+
+   ```yaml
+   volumes:
+     - "./custom-config.ini:/usr/local/etc/php/conf.d/custom-config.ini:ro"
+   ```
+
+3. Apply the changes
+
+   ```bash
+   docker compose up -d
+   ```
+
+4. Check the configuration by running on the GLPI container:
+
+   ```bash
+   docker compose exec glpi sh -c 'php -r "phpinfo();" | grep memory_limit'
+   ```
+
+   Or by browsing the GLPI website under `Setup > General > System > Server`.
+
+### Managing Cron tasks
+
+By default, the image includes a background worker that executes GLPI cron tasks every minute. This behavior is controlled by the `GLPI_CRONTAB_ENABLED` environment variable.
+
+This is especially useful for horizontal scaling or Kubernetes deployments, where you might want a dedicated container for cron tasks while disabling it on Web or API nodes to avoid automatic tasks duplication.
+
+See [environment variables section](#cron) for more details.
+
+### Adding custom Cron tasks
+
+Since the container runs as the non-root `www-data` user, traditional cron is not available. Instead, this image provides a built-in scheduler script that supports interval-based and daily scheduled tasks through supervisord.
+
+See the [custom scheduled jobs documentation](https://github.com/glpi-project/docker-images/blob/main/docs/custom-cron-tasks.md) for usage examples.
+
+## Environment variables
+
+### Database
+
+All five variables below are **required** for auto-install and auto-update to work. If any is missing, both features are disabled and GLPI will present the web-based installation wizard instead.
+
+| Variable           | Example  | Description                     |
+|:-------------------|:---------|:--------------------------------|
+| `GLPI_DB_HOST`     | `db`     | Database hostname or IP address |
+| `GLPI_DB_PORT`     | `3306`   | Database TCP port               |
+| `GLPI_DB_NAME`     | `glpi`   | Database name                   |
+| `GLPI_DB_USER`     | `glpi`   | Database username               |
+| `GLPI_DB_PASSWORD` | `secret` | Database password               |
+
+Database SSL/TLS configuration:
+
+> Only available for GLPI 11.0.7 and above.
+
+| Variable             | Default   | Description                                                 |
+|:---------------------|:----------|:------------------------------------------------------------|
+| `GLPI_DB_SSL`        | `false`   | Set to `true` to enable SSL/TLS for the database connection |
+| `GLPI_DB_SSL_CA`     | _(empty)_ | Path to the Certificate Authority (CA) certificate file     |
+| `GLPI_DB_SSL_CERT`   | _(empty)_ | Path to the client certificate file                         |
+| `GLPI_DB_SSL_KEY`    | _(empty)_ | Path to the client private key file                         |
+| `GLPI_DB_SSL_CAPATH` | _(empty)_ | Path to a directory containing trusted CA certificates      |
+| `GLPI_DB_SSL_CIPHER` | _(empty)_ | Allowed cipher(s) for the SSL connection                    |
+
+### Installation/Update
+
+| Variable                | Default | Description                                                        |
+|:------------------------|:--------|:-------------------------------------------------------------------|
+| `GLPI_SKIP_AUTOINSTALL` | `false` | Set to `true` to skip automatic database installation on first run |
+| `GLPI_SKIP_AUTOUPDATE`  | `false` | Set to `true` to skip automatic database schema updates on restart |
+
+### Cron
+
+| Variable               | Default | Description                                      |
+|:-----------------------|:--------|:-------------------------------------------------|
+| `GLPI_CRONTAB_ENABLED` | `1`     | Set to `0` to disable the background cron worker |
+
+### Path configuration
+
+These are preconfigured and generally do not need to be changed.
+
+| Variable               | Default                 | Description                  |
+|:-----------------------|:------------------------|:-----------------------------|
+| `GLPI_CONFIG_DIR`      | `/var/glpi/config`      | Configuration directory      |
+| `GLPI_VAR_DIR`         | `/var/glpi/files`       | Application data directory   |
+| `GLPI_LOG_DIR`         | `/var/glpi/logs`        | Log files directory          |
+| `GLPI_MARKETPLACE_DIR` | `/var/glpi/marketplace` | Plugin marketplace directory |
+
+## Image Maintenance Policy
+Image maintenance is run and hosted on the GLPI project under a scheduled GitHub workflow.
+
+### Weekly Security Rebuilds
+[![GLPI nightly and security rebuild](https://github.com/glpi-project/glpi/actions/workflows/docker_rebuild.yml/badge.svg)](https://github.com/glpi-project/glpi/actions/workflows/docker_rebuild.yml)
+
+The images corresponding to the latest release from each supported version of GLPI  are **automatically rebuilt periodically** to incorporate the latest security patches from the underlying Debian and PHP base images.
+
+**The GLPI application code is never changed during these rebuilds**, only the OS, the PHP runtime, and the system libraries are updated.
+
+### Pinning to a Specific Image Digest
+
+Every Docker image has a unique SHA256 digest (e.g., `sha256:abc123...`). Unlike tags, digests are **immutable** — they always point to the exact same image, even when a tag is updated.
+
+This is useful if you need to **rollback** to a known-good image after a new release introduces issues, or to **pin** a production deployment to an exact build.
+
+**Finding the digest:**
+- In the [GitHub Actions workflow summary](https://github.com/glpi-project/glpi/actions/workflows/docker_rebuild.yml) for the build — each run displays the digests and tags
+- Or using `docker inspect`: `docker inspect --format='{{index .RepoDigests 0}}' glpi/glpi:latest`
+
+**Using a digest in `docker compose`:**
+```yaml
+services:
+  glpi:
+    image: "glpi/glpi@sha256:abc123def456..."
+```
+
+**Pulling by digest:**
+```bash
+docker pull glpi/glpi@sha256:abc123def456...
+```

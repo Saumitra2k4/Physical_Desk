@@ -1,0 +1,110 @@
+﻿**********************
+Windows PowerShell transcript start
+Start time: 20260926052528
+Username: DESKTOP-JKQ8KBN\Admin
+RunAs User: DESKTOP-JKQ8KBN\Admin
+Configuration Name: 
+Machine: DESKTOP-JKQ8KBN (Microsoft Windows NT 10.0.22621.0)
+Host Application: C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe
+Process ID: 17372
+PSVersion: 5.1.22621.4249
+PSEdition: Desktop
+PSCompatibleVersions: 1.0, 2.0, 3.0, 4.0, 5.0, 5.1.22621.4249
+BuildVersion: 10.0.22621.4249
+CLRVersion: 4.0.30319.42000
+WSManStackVersion: 3.0
+PSRemotingProtocolVersion: 2.3
+SerializationVersion: 1.1.0.1
+**********************
+Transcript started, output file is C:\Users\Admin\Desktop\Physical Desk\engineering_logs\20260926_052528_AWS_IDENTITY_CHECK.txt
+PS C:\Users\Admin> try {
+    Write-Host "============================================================"
+    Write-Host "PD57 AWS ACCOUNT IDENTITY CHECK"
+    Write-Host "MODE=READ_ONLY"
+    Write-Host "============================================================"
+    Write-Host ""
+
+    Write-Host "COMMAND=aws sts get-caller-identity"
+    $IdentityRaw = aws sts get-caller-identity --output json 2>&1
+
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "IDENTITY_CHECK=FAIL"
+        Write-Host $IdentityRaw
+        throw "Unable to read AWS caller identity."
+    }
+
+    $Identity = $IdentityRaw | ConvertFrom-Json
+
+    Write-Host "ACCOUNT_ID=$($Identity.Account)"
+    Write-Host "CALLER_ARN=$($Identity.Arn)"
+    Write-Host "USER_ID=$($Identity.UserId)"
+    Write-Host ""
+
+    if ($Identity.Account -eq $ExpectedAccount) {
+        Write-Host "EXPECTED_ACCOUNT_MATCH=PASS"
+    }
+    else {
+        Write-Host "EXPECTED_ACCOUNT_MATCH=FAIL"
+        Write-Host "EXPECTED_ACCOUNT=$ExpectedAccount"
+        Write-Host "ACTUAL_ACCOUNT=$($Identity.Account)"
+    }
+
+    if ($Identity.Arn -match [regex]::Escape($ExpectedUser)) {
+        Write-Host "EXPECTED_USERNAME_MATCH=PASS"
+    }
+    else {
+        Write-Host "EXPECTED_USERNAME_MATCH=NOT_EXACT"
+        Write-Host "NOTE=This can be normal if AWS CLI is using an assumed role, SSO session, or federated identity."
+    }
+
+    Write-Host ""
+    Write-Host "ACTIVE_AWS_PROFILE=$(
+        if ($env:AWS_PROFILE) { $env:AWS_PROFILE } else { 'default-or-credential-chain' }
+    )"
+
+    Write-Host "CONFIGURED_REGION=$(aws configure get region)"
+    Write-Host ""
+
+    Write-Host "============================================================"
+
+    if ($Identity.Account -eq $ExpectedAccount) {
+        Write-Host "CHECKPOINT=AWS-IDENTITY"
+        Write-Host "RESULT=PASS"
+        Write-Host "SAFE_TO_CONTINUE_TO_AWS-02=True"
+    }
+    else {
+        Write-Host "CHECKPOINT=AWS-IDENTITY"
+        Write-Host "RESULT=FAIL"
+        Write-Host "SAFE_TO_CONTINUE_TO_AWS-02=False"
+    }
+
+    Write-Host "============================================================"
+}
+finally {
+    Stop-Transcript
+}
+============================================================
+PD57 AWS ACCOUNT IDENTITY CHECK
+MODE=READ_ONLY
+============================================================
+
+COMMAND=aws sts get-caller-identity
+ACCOUNT_ID=654654392863
+CALLER_ARN=arn:aws:iam::654654392863:user/Saumitra_Credex
+USER_ID=AIDAZQ3DRJIPXE3YWAPIC
+
+EXPECTED_ACCOUNT_MATCH=PASS
+EXPECTED_USERNAME_MATCH=PASS
+
+ACTIVE_AWS_PROFILE=default-or-credential-chain
+CONFIGURED_REGION=eu-north-1
+
+============================================================
+CHECKPOINT=AWS-IDENTITY
+RESULT=PASS
+SAFE_TO_CONTINUE_TO_AWS-02=True
+============================================================
+**********************
+Windows PowerShell transcript end
+End time: 20260926052534
+**********************

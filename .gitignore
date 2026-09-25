@@ -1,0 +1,22 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Runtime and generated files
+files/_log/*
+files/_cache/*
+files/_sessions/*
+files/_tmp/*
+files/_uploads/*
+public/build/
+
+# IDE and OS files
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+
+# Docker data / DB volumes
+db_data/
+mysql/
