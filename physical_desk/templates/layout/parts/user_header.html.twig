@@ -128,6 +128,11 @@
                <div class="modal-body text-center">
                   <h3>Physical Desk (PD57)</h3>
                   <p class="text-muted">Enterprise Service Management Platform</p>
+                  {% if not call('\\Glpi\\Toolbox\\VersionParser::isStableRelease', [constant('GLPI_VERSION')]) %}
+                     <div class="alert alert-important alert-warning d-flex">
+                        <strong>{{ __('This version is UNSTABLE and some SECURITY FIXES may not be included.') }}</strong>
+                     </div>
+                  {% endif %}
                   <hr/>
                   <p class="small text-muted">
                      Built on upstream framework engine v{{ constant('GLPI_VERSION') }}<br/>

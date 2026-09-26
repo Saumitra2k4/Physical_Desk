@@ -1,0 +1,77 @@
+/**
+ * PD57 Classifier — UI Styles
+ */
+
+.pd57-suggestions-container {
+    padding: 15px;
+}
+
+.pd57-suggestions-container h3 {
+    margin-bottom: 10px;
+    font-size: 1.2em;
+}
+
+.pd57-disclaimer {
+    background: #fff3cd;
+    border: 1px solid #ffc107;
+    border-radius: 6px;
+    padding: 10px 14px;
+    margin-bottom: 15px;
+    font-size: 0.9em;
+    color: #856404;
+}
+
+/* Confidence badges */
+.pd57-confidence {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-weight: 600;
+    font-size: 0.85em;
+    min-width: 50px;
+    text-align: center;
+}
+
+.pd57-conf-high {
+    background: #d4edda;
+    color: #155724;
+}
+
+.pd57-conf-medium {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.pd57-conf-low {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+/* Status labels */
+.pd57-status-pending {
+    color: #856404;
+    font-weight: 500;
+}
+
+.pd57-status-confirmed {
+    color: #155724;
+    font-weight: 600;
+}
+
+.pd57-status-overridden {
+    color: #004085;
+    font-weight: 600;
+}
+
+/* Model info footer */
+.pd57-model-info {
+    margin-top: 12px;
+    padding-top: 8px;
+    border-top: 1px solid #dee2e6;
+    color: #6c757d;
+}
+
+/* Confirm button */
+.pd57-confirm-btn {
+    white-space: nowrap;
+}

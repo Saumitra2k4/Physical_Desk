@@ -38,8 +38,12 @@ if ($GLPI_CACHE === null) {
 }
 
 // Session init for CLI
-Session::start();
-$_SESSION['glpiID'] = 2;
+$user = new User();
+if (!$user->getFromDBbyName('glpi')) throw new RuntimeException('Test admin unavailable');
+$auth = new Auth();
+$auth->auth_succeded = true;
+$auth->user = $user;
+Session::init($auth);
 Session::changeProfile(4);
 
 plugin_init_pd57classifier();
@@ -73,61 +77,19 @@ function runTest(string $testCode, string $description, callable $fn) {
     echo "\n";
 }
 
-// Group resolution helper - uses rule engine + DB + category fallback map
+// Read only the persisted assignment. Never simulate rules or infer from a category map.
 function resolveTicketGroup(int $ticketId): string {
     global $DB;
-    $tObj = new Ticket();
-    if (!$tObj->getFromDB($ticketId)) return 'Unassigned';
-
-    // Check direct DB group assignment first (from business rules fired at add time)
-    $res = $DB->request([
-        'SELECT' => ['g.name'],
-        'FROM'   => 'glpi_groups_tickets AS gt',
-        'INNER JOIN' => ['glpi_groups AS g' => ['ON' => ['gt' => 'groups_id', 'g' => 'id']]],
-        'WHERE'  => ['gt.tickets_id' => $ticketId, 'gt.type' => 2]
-    ]);
-    if ($row = $res->current()) return $row['name'];
-
-    // Simulate rule engine output
-    $rules = new RuleTicketCollection();
-    $input = [
-        'itilcategories_id' => $tObj->fields['itilcategories_id'],
-        'locations_id'      => $tObj->fields['locations_id'],
-        'name'              => $tObj->fields['name'],
-        'content'           => $tObj->fields['content'],
-        'urgency'           => $tObj->fields['urgency'],
-        'impact'            => $tObj->fields['impact'],
-    ];
-    $ruleOutput = $rules->processAllRules($input, [], ['ticket' => $ticketId]);
-    if (!empty($ruleOutput['_groups_id_assign'])) {
-        $gid = is_array($ruleOutput['_groups_id_assign']) ? $ruleOutput['_groups_id_assign'][0] : $ruleOutput['_groups_id_assign'];
-        $g = new Group();
-        if ($g->getFromDB($gid)) return $g->fields['name'];
+    $relation = new Group_Ticket();
+    foreach ($relation->find(['tickets_id' => $ticketId, 'type' => CommonITILActor::ASSIGN]) as $row) {
+        $group = new Group();
+        if ($group->getFromDB((int)$row['groups_id'])) return $group->fields['name'];
     }
+    return 'Unassigned';
+}
 
-    // Category-based deterministic fallback (mirrors PD57 routing matrix)
-    $catId = (int)$tObj->fields['itilcategories_id'];
-    $map = [
-        4 => 'PD57_HR_L1', 5 => 'PD57_HR_L1', 6 => 'PD57_HR_L1', 7 => 'PD57_HR_L1',
-        8 => 'PD57_HR_L1', 9 => 'PD57_HR_L1', 10 => 'PD57_HR_L1', 11 => 'PD57_HR_L1', 12 => 'PD57_HR_L1',
-        14 => 'PD57_IT_L1', 16 => 'PD57_IT_L1', 17 => 'PD57_IT_L1', 18 => 'PD57_IT_L1', 19 => 'PD57_IT_L1',
-        21 => 'PD57_IT_NETWORK', 22 => 'PD57_IT_NETWORK', 23 => 'PD57_IT_NETWORK', 24 => 'PD57_IT_NETWORK',
-        26 => 'PD57_IT_L1', 27 => 'PD57_IT_L1', 28 => 'PD57_IT_L1', 29 => 'PD57_IT_L1',
-        31 => 'PD57_IT_SECURITY', 32 => 'PD57_IT_SECURITY', 33 => 'PD57_IT_SECURITY', 34 => 'PD57_IT_SECURITY',
-        36 => 'PD57_IT_AV', 37 => 'PD57_IT_AV',
-        39 => 'PD57_IT_L1', 40 => 'PD57_IT_L1',
-        41 => 'PD57_PAYROLL_L1', 42 => 'PD57_PAYROLL_L1', 43 => 'PD57_PAYROLL_L1', 44 => 'PD57_PAYROLL_L1',
-        46 => 'PD57_OPS_L1', 47 => 'PD57_OPS_L1', 48 => 'PD57_OPS_L1', 49 => 'PD57_OPS_L1',
-        50 => 'PD57_OPS_L1', 51 => 'PD57_OPS_L1', 52 => 'PD57_OPS_L1', 53 => 'PD57_OPS_L1',
-        55 => 'PD57_OPS_L2', 56 => 'PD57_OPS_L2', 57 => 'PD57_OPS_L2', 58 => 'PD57_OPS_L2',
-        60 => 'PD57_OPS_L2', 61 => 'PD57_OPS_L2', 62 => 'PD57_OPS_L2',
-        64 => 'PD57_OPS_L1', 65 => 'PD57_OPS_L1',
-        67 => 'PD57_OPS_L1', 68 => 'PD57_OPS_L1',
-        69 => 'PD57_TRIAGE',
-    ];
-    $manualTriageId = plugin_pd57classifier_get_manual_triage_category_id();
-    if ($catId === $manualTriageId) return 'PD57_TRIAGE';
-    return $map[$catId] ?? 'Unassigned';
+function categoryId(string $path): int {
+    return plugin_pd57classifier_category_id_for_path($path);
 }
 
 // Suggestion record helper
@@ -184,7 +146,7 @@ runTest('E1', 'Employee confirms AI suggestion (Wi-Fi → PD57_IT_NETWORK)', fun
         'name'              => 'Studio Wi-Fi keeps disconnecting',
         'content'           => 'Wi-Fi AP in Studio A keeps dropping member check-in tablets.',
         'entities_id'       => 0,
-        'itilcategories_id' => 21, // Employee confirms Wi-Fi
+        'itilcategories_id' => categoryId('IT > Network > Wi-Fi'), // Employee confirms Wi-Fi
     ]);
     if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
     $group = resolveTicketGroup($tId);
@@ -204,7 +166,7 @@ runTest('E2', 'Employee changes department (AI suggested IT, employee chooses HR
         'name'              => 'Need help with laptop login but selecting HR',
         'content'           => 'My clock-in was recorded incorrectly on Thursday.',
         'entities_id'       => 0,
-        'itilcategories_id' => 5, // HR Attendance Correction
+        'itilcategories_id' => categoryId('HR > Leave & Attendance > Attendance Correction'), // HR Attendance Correction
     ]);
     if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
     $group = resolveTicketGroup($tId);
@@ -224,15 +186,15 @@ runTest('E3', 'Employee changes subcategory within same department', function() 
         'name'              => 'Network is slow but I need a password reset',
         'content'           => 'Forgotten credentials for portal access.',
         'entities_id'       => 0,
-        'itilcategories_id' => 26, // IT > Identity & Access > Password
+        'itilcategories_id' => categoryId('IT > Identity & Access > Password / Login'), // IT > Identity & Access > Password
     ]);
     if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
     $tObj = new Ticket(); $tObj->getFromDB($tId);
     $catId = (int)$tObj->fields['itilcategories_id'];
     return [
-        'passed'  => ($catId === 26),
+        'passed'  => ($catId === categoryId('IT > Identity & Access > Password / Login')),
         'details' => "Ticket #{$tId} final category: {$catId} (Password/Login)",
-        'reason'  => "Category was changed from employee selection 26 to {$catId}"
+        'reason'  => "Category was changed from employee selection to {$catId}"
     ];
 });
 
@@ -243,7 +205,7 @@ runTest('E4', 'Explicit manual category is authoritative — AI does not overwri
         'name'              => 'Equipment issue in studio',
         'content'           => 'Barre support wobbly in Studio B.',
         'entities_id'       => 0,
-        'itilcategories_id' => 50, // Operations > Studio Equipment > Barre Equipment
+        'itilcategories_id' => categoryId('Operations > Studio Equipment > Barre Equipment'), // Operations > Studio Equipment > Barre Equipment
     ]);
     if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
     $tObj = new Ticket(); $tObj->getFromDB($tId);
@@ -251,7 +213,7 @@ runTest('E4', 'Explicit manual category is authoritative — AI does not overwri
     $rec = getTopSuggestion($tId);
     $src = $rec['classification_source'] ?? '';
     return [
-        'passed'  => ($finalCat === 50 && ($src === 'employee_confirmed' || $src === 'employee_override' || $src === 'manual_selection')),
+        'passed'  => ($finalCat === categoryId('Operations > Studio Equipment > Barre Equipment') && ($src === 'employee_confirmed' || $src === 'employee_override' || $src === 'manual_selection')),
         'details' => "Ticket #{$tId} category: {$finalCat}, Source: {$src}",
         'reason'  => "Category {$finalCat} or source '{$src}' incorrect"
     ];
@@ -264,7 +226,7 @@ runTest('E5', 'Abstention fallback with manual employee selection', function() {
         'name'              => 'Unclear request text 12345',
         'content'           => 'XYZ random nonsense',
         'entities_id'       => 0,
-        'itilcategories_id' => 41, // Payroll > Salary
+        'itilcategories_id' => categoryId('Payroll > Salary'), // Payroll > Salary
     ]);
     if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
     $group = resolveTicketGroup($tId);
@@ -308,7 +270,7 @@ runTest('E7', 'Classifier unavailable — employee can still classify and submit
         'name'              => 'Ticket while classifier is down',
         'content'           => 'Wi-Fi issue test with classifier offline.',
         'entities_id'       => 0,
-        'itilcategories_id' => 21, // Employee manually selects Wi-Fi
+        'itilcategories_id' => categoryId('IT > Network > Wi-Fi'), // Employee manually selects Wi-Fi
     ]);
 
     putenv('PD57_CLASSIFIER_URL=' . ($origUrl ?: 'http://pd57-classifier:5000'));
@@ -321,72 +283,52 @@ runTest('E7', 'Classifier unavailable — employee can still classify and submit
     $failureReason = $rec['failure_reason'] ?? '';
 
     return [
-        'passed'  => ($tId > 0 && $finalCat === 21 && !empty($failureReason)),
+        'passed'  => ($tId > 0 && $finalCat === categoryId('IT > Network > Wi-Fi') && !empty($failureReason)),
         'details' => "Ticket #{$tId} created (cat: {$finalCat}), Failure: {$failureReason}",
         'reason'  => "Ticket failed or no failure_reason recorded"
     ];
 });
 
-// --- T9: Agent Override Authority ---
-runTest('T9', 'Authorized Agent Override is authoritative (AI < Employee < Agent)', function() {
-    global $DB;
+// --- T9: Authorized agent action through the same service used by HTTP ---
+runTest('T9', 'Authorized agent override updates ticket and suggestion audit', function() {
     $ticket = new Ticket();
-    $tId = $ticket->add([
-        'name'              => 'Initial Wi-Fi ticket for agent override test',
-        'content'           => 'Wi-Fi issue in studio — agent will reclassify.',
-        'entities_id'       => 0,
-        'itilcategories_id' => 21,
+    $id = $ticket->add([
+        'name' => 'Agent classification correction',
+        'content' => 'Studio account access issue requiring agent correction.',
+        'entities_id' => 0,
+        'itilcategories_id' => categoryId('IT > Network > Wi-Fi'),
     ]);
-    if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
-
-    // Agent overrides to IT Cybersecurity > Security Incident (ID 34)
-    $DB->update('glpi_tickets', ['itilcategories_id' => 34], ['id' => $tId]);
-    $rec = getTopSuggestion($tId);
-    if ($rec) {
-        $DB->update('glpi_plugin_pd57classifier_suggestions', [
-            'human_override'       => 1,
-            'override_category_id' => 34,
-            'override_user_id'     => 2,
-            'override_date'        => date('Y-m-d H:i:s'),
-        ], ['id' => $rec['id']]);
-    }
-
-    $updatedTicket = new Ticket(); $updatedTicket->getFromDB($tId);
-    $finalCat = (int)$updatedTicket->fields['itilcategories_id'];
+    if ($id <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
+    $suggestion = getTopSuggestion($id);
+    if (!$suggestion) return ['passed' => false, 'reason' => 'No persisted suggestion'];
+    $target = categoryId('IT > Cybersecurity > Security Incident');
+    $result = plugin_pd57classifier_apply_suggestion('override', (int)$suggestion['id'], $id, $target);
+    $updated = new Ticket(); $updated->getFromDB($id);
+    $audit = getTopSuggestion($id);
     return [
-        'passed'  => ($finalCat === 34),
-        'details' => "Ticket #{$tId} → category {$finalCat} after agent override",
-        'reason'  => "Expected 34, got {$finalCat}"
+        'passed' => !empty($result['success']) && (int)$updated->fields['itilcategories_id'] === $target
+            && (int)$audit['human_override'] === 1 && (int)$audit['override_category_id'] === $target,
+        'details' => "Ticket #$id, action HTTP " . $result['code'],
+        'reason' => 'Agent action, ticket or persisted audit disagreed',
     ];
 });
 
 // --- T10: Malformed Response Safety (5 sub-cases via call_service validation) ---
-runTest('T10a', 'Malformed JSON response → safe fallback (via direct call_service)', function() {
-    // The call_service function handles malformed JSON in its validator.
-    // Simulate by verifying the function's own structural validator.
-    // call_service against real classifier with very short text triggers edge case.
-    $result = plugin_pd57classifier_call_service("ab"); // very short, may not classify well
-    $hasSuggestions = !empty($result['suggestions']);
-    return [
-        'passed'  => $hasSuggestions, // should always return at least a fallback
-        'details' => "Suggestions count: " . count($result['suggestions'] ?? []) . ", Fallback: " . var_export($result['fallback_used'] ?? null, true),
-        'reason'  => "call_service returned no suggestions for edge-case input"
-    ];
+runTest('T10a', 'Malformed JSON produces canonical fallback', function() {
+    $result = plugin_pd57classifier_parse_response('{invalid');
+    return ['passed' => !empty($result['fallback_used'])
+        && $result['suggestions'][0]['category_id'] === categoryId('Other > Manual Triage')
+        && $result['failure_reason'] === 'malformed_json',
+        'reason' => 'Malformed response did not produce Manual Triage'];
 });
 
-runTest('T10b', 'Nonexistent category in suggestions → validated away', function() {
-    // Directly test the structural validation by verifying that a real
-    // classify call returns only known category_ids (> 0).
-    $result = plugin_pd57classifier_call_service("Studio Wi-Fi keeps disconnecting during check-in");
-    $allValid = true;
-    foreach ($result['suggestions'] ?? [] as $s) {
-        if ((int)($s['category_id'] ?? 0) <= 0) $allValid = false;
-    }
-    return [
-        'passed'  => $allValid && !empty($result['suggestions']),
-        'details' => "All " . count($result['suggestions']) . " suggestions have valid category_id > 0",
-        'reason'  => "Found suggestion with category_id <= 0"
-    ];
+runTest('T10b', 'Nonexistent suggested category is rejected', function() {
+    $result = plugin_pd57classifier_parse_response(json_encode(['suggestions' => [[
+        'path' => 'IT > Invented Category', 'confidence' => 0.99, 'category_id' => 999999,
+    ]]]));
+    return ['passed' => !empty($result['fallback_used'])
+        && $result['suggestions'][0]['category_id'] === categoryId('Other > Manual Triage'),
+        'reason' => 'Unconfigured category was accepted'];
 });
 
 runTest('T10c', 'Classifier-down request → safe fallback with failure_reason', function() {
@@ -407,18 +349,11 @@ runTest('T10c', 'Classifier-down request → safe fallback with failure_reason',
     ];
 });
 
-runTest('T10d', 'Empty response → safe fallback', function() {
-    // Simulate empty response by calling unreachable host
-    $origUrl = getenv('PD57_CLASSIFIER_URL');
-    putenv('PD57_CLASSIFIER_URL=http://127.0.0.1:19999');
-    $result = plugin_pd57classifier_call_service("Another test request");
-    putenv('PD57_CLASSIFIER_URL=' . ($origUrl ?: 'http://pd57-classifier:5000'));
-
-    return [
-        'passed'  => (!empty($result['suggestions']) && !empty($result['failure_reason'])),
-        'details' => "Safely returned " . count($result['suggestions']) . " fallback suggestion(s)",
-        'reason'  => "Did not produce safe fallback"
-    ];
+runTest('T10d', 'Empty HTTP body produces canonical fallback', function() {
+    $result = plugin_pd57classifier_parse_response('');
+    return ['passed' => !empty($result['fallback_used'])
+        && $result['suggestions'][0]['category_id'] === categoryId('Other > Manual Triage'),
+        'reason' => 'Empty body did not produce Manual Triage'];
 });
 
 runTest('T10e', 'Ticket creation with classifier failure → no PHP fatal, ticket persists', function() {
@@ -429,14 +364,17 @@ runTest('T10e', 'Ticket creation with classifier failure → no PHP fatal, ticke
         'name'              => 'Ticket created during classifier failure T10e',
         'content'           => 'Verifying no PHP fatal error occurs.',
         'entities_id'       => 0,
-        'itilcategories_id' => 14, // IT Service Desk
     ]);
     putenv('PD57_CLASSIFIER_URL=' . ($origUrl ?: 'http://pd57-classifier:5000'));
 
+    if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
+    $saved = new Ticket(); $saved->getFromDB($tId);
+    $record = getTopSuggestion($tId);
     return [
-        'passed'  => ($tId > 0),
-        'details' => "Ticket #{$tId} created successfully despite classifier failure",
-        'reason'  => "Ticket creation failed (PHP fatal or add returned 0)"
+        'passed' => (int)$saved->fields['itilcategories_id'] === categoryId('Other > Manual Triage')
+            && resolveTicketGroup($tId) === 'PD57_TRIAGE' && !empty($record['failure_reason']),
+        'details' => "Ticket #$tId persisted with Manual Triage and PD57_TRIAGE",
+        'reason' => 'Fallback category, persisted route or failure metadata missing',
     ];
 });
 
@@ -466,7 +404,7 @@ runTest('T12', 'Execution model is bounded synchronous (PRE_ITEM_ADD, not async)
         'name'              => 'Execution model timing test',
         'content'           => 'Wi-Fi outage in Studio B affecting check-in tablets.',
         'entities_id'       => 0,
-        'itilcategories_id' => 21,
+        'itilcategories_id' => categoryId('IT > Network > Wi-Fi'),
     ]);
     $elapsed = microtime(true) - $start;
 
@@ -523,7 +461,7 @@ runTest('T14', 'Metadata schema has all required audit columns', function() {
 });
 
 // --- T15: Restart Persistence ---
-runTest('T15', 'Restart persistence — tickets, categories, AI metadata survive across queries', function() {
+runTest('T15', 'Ticket and AI metadata persist across fresh database reads (restart tested separately)', function() {
     global $DB;
     // Pick the last ticket we created with a suggestion record
     $lastSug = $DB->request([

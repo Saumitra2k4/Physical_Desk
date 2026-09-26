@@ -1,0 +1,24 @@
+<?php
+/** Copy to untracked config_db.php on the server, or use the GLPI installer. */
+class DB extends DBmysql {
+   public $dbhost;
+   public $dbuser;
+   public $dbpassword;
+   public $dbdefault;
+   public $use_timezones = true;
+   public $use_utf8mb4 = true;
+   public $allow_datetime = false;
+   public $allow_signed_keys = false;
+
+   public function __construct() {
+      $this->dbhost = getenv('PD57_DB_HOST') ?: 'db';
+      $this->dbuser = getenv('PD57_DB_USER') ?: 'glpi';
+      $password = getenv('PD57_DB_PASSWORD');
+      if ($password === false || $password === '') {
+         throw new RuntimeException('PD57_DB_PASSWORD is required');
+      }
+      $this->dbpassword = $password;
+      $this->dbdefault = getenv('PD57_DB_NAME') ?: 'pd57';
+      parent::__construct();
+   }
+}

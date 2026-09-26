@@ -4,6 +4,8 @@
 !/marketplace/.gitkeep
 /plugins/*
 !/plugins/.gitkeep
+!/plugins/pd57classifier/
+!/plugins/pd57classifier/**
 /files/*/*
 !/files/*/.gitkeep
 /.buildpath
@@ -58,3 +60,7 @@ phpstan.neon
 /tests/e2e/output/
 /tests/e2e/.env.local
 !/tests/e2e/.env
+
+# Runtime credentials must never enter a source archive.
+/config/config_db.php
+!/config/config_db.php.example

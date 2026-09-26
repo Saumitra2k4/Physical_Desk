@@ -21,6 +21,10 @@ services:
       - db
     environment:
       PD57_BASE_URL: http://localhost:8080
+      PD57_DB_HOST: db
+      PD57_DB_USER: ${PD57_DB_USER:-glpi}
+      PD57_DB_PASSWORD: ${PD57_DB_PASSWORD:?Set PD57_DB_PASSWORD outside Git}
+      PD57_DB_NAME: pd57
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
@@ -32,10 +36,10 @@ services:
       - "db:/var/lib/mysql"
       - ".docker/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql"
     environment:
-      MARIADB_ROOT_PASSWORD: "glpi"
+      MARIADB_ROOT_PASSWORD: ${PD57_DB_ROOT_PASSWORD:?Set PD57_DB_ROOT_PASSWORD outside Git}
       MARIADB_DATABASE: "pd57"
-      MARIADB_USER: "glpi"
-      MARIADB_PASSWORD: "glpi"
+      MARIADB_USER: ${PD57_DB_USER:-glpi}
+      MARIADB_PASSWORD: ${PD57_DB_PASSWORD:?Set PD57_DB_PASSWORD outside Git}
     expose:
       - "3306"
 
@@ -59,8 +63,8 @@ services:
 
       LABEL_pd57: "PD57 MariaDB Server"
       SERVER_pd57: "db"
-      USER_pd57: "glpi"
-      PASSWORD_pd57: "glpi"
+      USER_pd57: ${PD57_DB_USER:-glpi}
+      PASSWORD_pd57: ${PD57_DB_PASSWORD:?Set PD57_DB_PASSWORD outside Git}
       PORT_pd57: 3306
       ENGINE_pd57: "mysql@dbgate-plugin-mysql"
 
@@ -73,7 +77,7 @@ services:
       LDAP_ORGANISATION: "Physical Desk"
       LDAP_DOMAIN: "pd57.local"
       LDAP_ADMIN_USERNAME: "admin"
-      LDAP_ADMIN_PASSWORD: "admin"
+      LDAP_ADMIN_PASSWORD: ${PD57_LDAP_ADMIN_PASSWORD:?Set PD57_LDAP_ADMIN_PASSWORD outside Git}
     command: "--copy-service"
     volumes:
       - "./tests/LDAP/ldif/10-users.ldif:/container/service/slapd/assets/config/bootstrap/ldif/50-bootstrap.ldif:rw"

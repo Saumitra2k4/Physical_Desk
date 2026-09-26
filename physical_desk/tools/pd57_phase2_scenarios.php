@@ -81,6 +81,7 @@ function createScenarioTicket($title, $content, $category_name, $location_name, 
     $cat_id = getCatId($category_name);
     $loc_id = getLocId($location_name);
     
+    // Input deliberately omits the expected assignment; native rules must provide it.
     // Prepare input for Ticket
     $input = [
         'name' => $title,
@@ -92,14 +93,6 @@ function createScenarioTicket($title, $content, $category_name, $location_name, 
         '_auto_update' => true
     ];
     
-    // Assign expected group directly if specified or via rule map
-    if ($target_group_name) {
-        $gid = getGroupId($target_group_name);
-        if ($gid > 0) {
-            $input['_groups_id_assign'] = [$gid];
-        }
-    }
-
     $ticket = new Ticket();
     $tid = $ticket->add($input);
     if (!$tid) {
@@ -134,8 +127,23 @@ function createScenarioTicket($title, $content, $category_name, $location_name, 
         'location' => $location_name,
         'priority' => $ticket->fields['priority'],
         'assigned_groups' => implode(', ', $group_names),
-        'sla_ttr' => $ticket->fields['slas_id_ttr']
+        'sla_ttr' => $ticket->fields['slas_id_ttr'],
+        'sla_tto' => $ticket->fields['slas_id_tto']
     ];
+}
+
+function assertScenario($label, $result, $expectedGroup, $expectedPriority = null) {
+    if (!$result) {
+        throw new RuntimeException("Scenario $label ticket was not created");
+    }
+    $groups = array_map('trim', explode(',', $result['assigned_groups']));
+    if (!in_array($expectedGroup, $groups, true)) {
+        throw new RuntimeException("Scenario $label missing persisted group $expectedGroup; found " . $result['assigned_groups']);
+    }
+    if ($expectedPriority !== null && (int)$result['priority'] !== $expectedPriority) {
+        throw new RuntimeException("Scenario $label priority was " . $result['priority'] . ", expected $expectedPriority");
+    }
+    echo "[PASS] Scenario $label Ticket #" . $result['id'] . ": persisted assignment " . $result['assigned_groups'] . PHP_EOL;
 }
 
 // ---------------------------------------------------------
@@ -151,7 +159,12 @@ $resA = createScenarioTicket(
     null, 0, 3,
     'PD57_HR_L1'
 );
-echo "[PASS] Scenario A Ticket ID {$resA['id']}: Assigned to [{$resA['assigned_groups']}] | Priority: {$resA['priority']}" . PHP_EOL;
+assertScenario('A', $resA, 'PD57_HR_L1');
+if ((int)$resA['sla_tto'] !== getSlaId('PD57_SLA_NORMAL_TTO')
+    || (int)$resA['sla_ttr'] !== getSlaId('PD57_SLA_NORMAL')) {
+    throw new RuntimeException('Scenario A did not receive both Normal SLA objectives');
+}
+echo '[PASS] Scenario A persisted both TTO and TTR objectives' . PHP_EOL;
 
 echo PHP_EOL . "--- Scenario B: IT Network ---" . PHP_EOL;
 $resB = createScenarioTicket(
@@ -162,7 +175,7 @@ $resB = createScenarioTicket(
     null, 0, 3,
     'PD57_IT_NETWORK'
 );
-echo "[PASS] Scenario B Ticket ID {$resB['id']}: Assigned to [{$resB['assigned_groups']}] | Priority: {$resB['priority']}" . PHP_EOL;
+assertScenario('B', $resB, 'PD57_IT_NETWORK');
 
 echo PHP_EOL . "--- Scenario C: IT Cybersecurity ---" . PHP_EOL;
 $resC = createScenarioTicket(
@@ -173,7 +186,7 @@ $resC = createScenarioTicket(
     null, 0, 3,
     'PD57_IT_SECURITY'
 );
-echo "[PASS] Scenario C Ticket ID {$resC['id']}: Assigned to [{$resC['assigned_groups']}] | Priority: {$resC['priority']}" . PHP_EOL;
+assertScenario('C', $resC, 'PD57_IT_SECURITY');
 
 echo PHP_EOL . "--- Scenario D: Payroll ---" . PHP_EOL;
 $resD = createScenarioTicket(
@@ -184,7 +197,7 @@ $resD = createScenarioTicket(
     null, 0, 3,
     'PD57_PAYROLL_L1'
 );
-echo "[PASS] Scenario D Ticket ID {$resD['id']}: Assigned to [{$resD['assigned_groups']}] | Priority: {$resD['priority']}" . PHP_EOL;
+assertScenario('D', $resD, 'PD57_PAYROLL_L1');
 
 echo PHP_EOL . "--- Scenario E: Barre / Studio Equipment ---" . PHP_EOL;
 $barre_b4_id = getApplianceId('PD57-BARRE-MUM-B-004');
@@ -198,7 +211,7 @@ $resE = createScenarioTicket(
     3,
     'PD57_OPS_L1'
 );
-echo "[PASS] Scenario E Ticket ID {$resE['id']}: Assigned to [{$resE['assigned_groups']}] | Asset: PD57-BARRE-MUM-B-004 (ID $barre_b4_id)" . PHP_EOL;
+assertScenario('E', $resE, 'PD57_OPS_L1');
 
 echo PHP_EOL . "--- Scenario F: Studio Audio ---" . PHP_EOL;
 $audio_a1_id = getApplianceId('PD57-AUDIO-MUM-A-001');
@@ -212,7 +225,7 @@ $resF = createScenarioTicket(
     3,
     'PD57_IT_AV'
 );
-echo "[PASS] Scenario F Ticket ID {$resF['id']}: Assigned to [{$resF['assigned_groups']}] | Asset: PD57-AUDIO-MUM-A-001 (ID $audio_a1_id)" . PHP_EOL;
+assertScenario('F', $resF, 'PD57_IT_AV');
 
 echo PHP_EOL . "--- Scenario G: Facility Maintenance ---" . PHP_EOL;
 $ac_c1_id = getApplianceId('PD57-AC-MUM-C-001');
@@ -226,7 +239,7 @@ $resG = createScenarioTicket(
     3,
     'PD57_OPS_L2'
 );
-echo "[PASS] Scenario G Ticket ID {$resG['id']}: Assigned to [{$resG['assigned_groups']}] | Asset: PD57-AC-MUM-C-001 (ID $ac_c1_id)" . PHP_EOL;
+assertScenario('G', $resG, 'PD57_OPS_L2');
 
 echo PHP_EOL . "--- Scenario H: Safety-Sensitive Equipment ---" . PHP_EOL;
 $barre_a1_id = getApplianceId('PD57-BARRE-MUM-A-001');
@@ -237,10 +250,15 @@ $resH = createScenarioTicket(
     'Studio A',
     'Appliance',
     $barre_a1_id,
-    5, // Critical urgency
+    5, // Very high urgency in GLPI
     'PD57_OPS_L2'
 );
-echo "[PASS] Scenario H Ticket ID {$resH['id']}: Assigned to [{$resH['assigned_groups']}] | Priority: {$resH['priority']} (Critical) | Asset: PD57-BARRE-MUM-A-001" . PHP_EOL;
+assertScenario('H', $resH, 'PD57_OPS_L2', 5);
+if ((int)$resH['sla_tto'] !== getSlaId('PD57_SLA_CRITICAL_TTO')
+    || (int)$resH['sla_ttr'] !== getSlaId('PD57_SLA_CRITICAL')) {
+    throw new RuntimeException('Scenario H did not receive both Very High SLA objectives');
+}
+echo '[PASS] Scenario H persisted both TTO and TTR objectives' . PHP_EOL;
 
 echo PHP_EOL . "--- Scenario I: Unknown Manual Triage ---" . PHP_EOL;
 $resI = createScenarioTicket(
@@ -251,7 +269,7 @@ $resI = createScenarioTicket(
     null, 0, 3,
     'PD57_TRIAGE'
 );
-echo "[PASS] Scenario I Ticket ID {$resI['id']}: Assigned to [{$resI['assigned_groups']}] (PD57_TRIAGE)" . PHP_EOL;
+assertScenario('I', $resI, 'PD57_TRIAGE');
 
 echo PHP_EOL . "--- Scenario J: SLA Escalation Flow ---" . PHP_EOL;
 $resJ = createScenarioTicket(
@@ -260,19 +278,38 @@ $resJ = createScenarioTicket(
     'Wi-Fi',
     'Studio A',
     null, 0, 3,
-    'PD57_IT_L1'
+    'PD57_IT_NETWORK'
 );
+assertScenario('J initial', $resJ, 'PD57_IT_NETWORK');
 $tidJ = $resJ['id'];
 $sla_high_id = getSlaId('PD57_SLA_HIGH');
 $ticketJ = new Ticket();
 $ticketJ->getFromDB($tidJ);
-$ticketJ->update(['id' => $tidJ, 'slas_id_ttr' => $sla_high_id]);
+if (!$ticketJ->update(['id' => $tidJ, 'slas_id_ttr' => $sla_high_id])) {
+    throw new RuntimeException('Scenario J could not attach the High TTR objective');
+}
+$ticketJ->getFromDB($tidJ);
+if ((int)$ticketJ->fields['slas_id_ttr'] !== $sla_high_id) {
+    throw new RuntimeException('Scenario J High TTR objective did not persist');
+}
 
 // Add SLA Level Action for Escalation
-$slaLevel = new SlaLevel();
-$slaL_id = $slaLevel->add(['name' => 'PD57_IT_ESCALATION_LEVEL', 'slas_id' => $sla_high_id, 'execution_time' => 0]);
+$levelRow = $DB->request([
+    'SELECT' => ['id'], 'FROM' => 'glpi_slalevels',
+    'WHERE' => ['name' => 'PD57_IT_ESCALATION_LEVEL', 'slas_id' => $sla_high_id],
+    'ORDER' => 'id ASC', 'LIMIT' => 1,
+])->current();
+if ($levelRow) {
+    $slaL_id = (int)$levelRow['id'];
+} else {
+    $slaLevel = new SlaLevel();
+    $slaL_id = $slaLevel->add(['name' => 'PD57_IT_ESCALATION_LEVEL', 'slas_id' => $sla_high_id, 'execution_time' => 0]);
+}
+if (!$slaL_id) throw new RuntimeException('Scenario J escalation level unavailable');
 $slaAct = new SlaLevelAction();
-$slaAct->add(['slalevels_id' => $slaL_id, 'action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => getGroupId('PD57_IT_L2')]);
+if (!$slaAct->getFromDBByCrit(['slalevels_id' => $slaL_id, 'field' => '_groups_id_assign'])) {
+    $slaAct->add(['slalevels_id' => $slaL_id, 'action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => getGroupId('PD57_IT_L2')]);
+}
 
 // Force SLA execution
 $DB->insert('glpi_slalevels_tickets', ['tickets_id' => $tidJ, 'slalevels_id' => $slaL_id, 'date' => date('Y-m-d H:i:s', time() - 300)]);
@@ -287,6 +324,9 @@ $groupsJ = [];
 foreach ($assignedJ as $ag) {
     $groupsJ[] = getGroupName($ag['groups_id']);
 }
-echo "[PASS] Scenario J Ticket ID $tidJ: Escalated Groups: [" . implode(', ', $groupsJ) . "]" . PHP_EOL;
+if (!in_array('PD57_IT_L2', $groupsJ, true)) {
+    throw new RuntimeException('Scenario J escalation did not persist PD57_IT_L2; found ' . implode(', ', $groupsJ));
+}
+echo "[PASS] Scenario J Ticket ID $tidJ: persisted escalation PD57_IT_L2" . PHP_EOL;
 
 echo PHP_EOL . "=== ALL END-TO-END SCENARIOS A - J PASSED ===" . PHP_EOL;

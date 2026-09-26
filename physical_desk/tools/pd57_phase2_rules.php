@@ -26,14 +26,43 @@ function createTicketRule($name, $criterias, $actions, $match = 'AND') {
     $rule = new RuleTicket();
     // Check if rule exists
     if ($rule->getFromDBByCrit(['name' => $name])) {
-        echo "[EXISTS] Rule '$name' (ID: " . $rule->fields['id'] . ")" . PHP_EOL;
-        return $rule->fields['id'];
+        $rule_id = (int)$rule->fields['id'];
+        if ((int)$rule->fields['condition'] !== (RuleTicket::ONADD | RuleTicket::ONUPDATE)) {
+            if (!$rule->update(['id' => $rule_id, 'condition' => RuleTicket::ONADD | RuleTicket::ONUPDATE])) {
+                throw new RuntimeException("Could not enable add/update routing for $name");
+            }
+        }
+        foreach ($criterias as $crit) {
+            $existingCriteria = new RuleCriteria();
+            if ($existingCriteria->getFromDBByCrit(['rules_id' => $rule_id, 'criteria' => $crit['criteria']])) {
+                if ((int)$existingCriteria->fields['condition'] !== (int)$crit['condition']
+                    || (string)$existingCriteria->fields['pattern'] !== (string)$crit['pattern']) {
+                    if (!$existingCriteria->update(['id' => $existingCriteria->getID(),
+                        'condition' => $crit['condition'], 'pattern' => $crit['pattern']])) {
+                        throw new RuntimeException("Could not correct criteria for $name");
+                    }
+                }
+            } else {
+                $existingCriteria->add(['rules_id' => $rule_id, 'criteria' => $crit['criteria'],
+                    'condition' => $crit['condition'], 'pattern' => $crit['pattern']]);
+            }
+        }
+        foreach ($actions as $act) {
+            $existing = new RuleAction();
+            if (!$existing->getFromDBByCrit(['rules_id' => $rule_id, 'field' => $act['field']])) {
+                $existing->add(['rules_id' => $rule_id, 'action_type' => $act['action_type'],
+                    'field' => $act['field'], 'value' => $act['value']]);
+            }
+        }
+        echo "[VERIFIED] Rule '$name' (ID: $rule_id)" . PHP_EOL;
+        return $rule_id;
     }
     
     $rule_id = $rule->add([
         'name' => $name,
         'sub_type' => 'RuleTicket',
         'is_active' => 1,
+        'condition' => RuleTicket::ONADD | RuleTicket::ONUPDATE,
         'match' => $match,
         'description' => "PD57 Automated Routing Rule: $name"
     ]);
@@ -103,93 +132,117 @@ $g_it_av   = getGroupId('PD57_IT_AV');
 $g_triage  = getGroupId('PD57_TRIAGE');
 
 $sla_crit = getSlaId('PD57_SLA_CRITICAL');
+$sla_crit_tto = getSlaId('PD57_SLA_CRITICAL_TTO');
 $sla_high = getSlaId('PD57_SLA_HIGH');
+$sla_high_tto = getSlaId('PD57_SLA_HIGH_TTO');
 $sla_norm = getSlaId('PD57_SLA_NORMAL');
+$sla_norm_tto = getSlaId('PD57_SLA_NORMAL_TTO');
+$sla_low = getSlaId('PD57_SLA_LOW');
+$sla_low_tto = getSlaId('PD57_SLA_LOW_TTO');
+foreach ([$sla_crit, $sla_crit_tto, $sla_high, $sla_high_tto, $sla_norm, $sla_norm_tto, $sla_low, $sla_low_tto] as $slaId) {
+    if (!$slaId) throw new RuntimeException('Provision both TTO and TTR objectives before routing rules');
+}
 
 // 1. HR Routing Rule
 createTicketRule('PD57 Route HR', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('HR')] // under HR category
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('HR')] // under HR category
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_hr_l1]
 ]);
 
 // 2. Payroll Routing Rule
 createTicketRule('PD57 Route Payroll', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('Payroll')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('Payroll')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_pay_l1]
 ]);
 
 // 3. Operations General Routing Rule
 createTicketRule('PD57 Route Operations', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('Operations')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('Operations')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_ops_l1]
 ]);
 
 // 4. IT General Routing Rule
 createTicketRule('PD57 Route IT General', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('IT')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('IT')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_it_l1]
 ]);
 
 // 5. IT Network Specialist Rule
 createTicketRule('PD57 Route IT Network', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('Network')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('Network')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_it_net]
 ]);
 
 // 6. IT Cybersecurity Specialist Rule
 createTicketRule('PD57 Route IT Security', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('Cybersecurity')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('Cybersecurity')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_it_sec]
 ]);
 
 // 7. IT Hardware Specialist Rule
 createTicketRule('PD57 Route IT Hardware', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('Hardware')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('Hardware')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_it_hw]
 ]);
 
 // 8. IT Identity & Access Rule
 createTicketRule('PD57 Route IT Access', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('Identity & Access')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('Identity & Access')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_it_acc]
 ]);
 
 // 9. IT Studio AV Rule
 createTicketRule('PD57 Route IT Studio AV', [
-    ['criteria' => 'itilcategories_id', 'condition' => 0, 'pattern' => getCatId('Studio Audio / Visual')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_IS, 'pattern' => getCatId('Studio Audio / Visual')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_it_av]
 ]);
 
 // 10. Operations Facility Maintenance Rule
 createTicketRule('PD57 Route Facilities', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('Facility Maintenance')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('Facility Maintenance')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_ops_l2]
 ]);
 
 // 11. Safety / Operational Incident Rule (Rule-based safety escalation)
 createTicketRule('PD57 Safety Incident Priority', [
-    ['criteria' => 'itilcategories_id', 'condition' => 0, 'pattern' => getCatId('Safety / Operational Incident')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_IS, 'pattern' => getCatId('Safety / Operational Incident')]
 ], [
-    ['action_type' => 'assign', 'field' => 'priority', 'value' => 5], // Critical
+    ['action_type' => 'assign', 'field' => 'priority', 'value' => 5], // GLPI Very high; deterministic safety policy
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_ops_l2],
-    ['action_type' => 'assign', 'field' => 'slas_id_ttr', 'value' => $sla_crit]
+    ['action_type' => 'assign', 'field' => 'slas_id_ttr', 'value' => $sla_crit],
+    ['action_type' => 'assign', 'field' => 'slas_id_tto', 'value' => $sla_crit_tto]
 ]);
 
 // 12. Manual Triage / Other Rule
 createTicketRule('PD57 Route Manual Triage', [
-    ['criteria' => 'itilcategories_id', 'condition' => 17, 'pattern' => getCatId('Other')]
+    ['criteria' => 'itilcategories_id', 'condition' => Rule::PATTERN_UNDER, 'pattern' => getCatId('Other')]
 ], [
     ['action_type' => 'assign', 'field' => '_groups_id_assign', 'value' => $g_triage]
 ]);
+
+// Apply both native SLA objectives after category and safety rules have set final priority.
+foreach ([
+    5 => ['VERY_HIGH', $sla_crit_tto, $sla_crit],
+    4 => ['HIGH', $sla_high_tto, $sla_high],
+    3 => ['NORMAL', $sla_norm_tto, $sla_norm],
+    2 => ['LOW', $sla_low_tto, $sla_low],
+] as $priority => [$tier, $ttoId, $ttrId]) {
+    createTicketRule('PD57 SLA Priority ' . $tier, [
+        ['criteria' => 'priority', 'condition' => Rule::PATTERN_IS, 'pattern' => $priority],
+    ], [
+        ['action_type' => 'assign', 'field' => 'slas_id_tto', 'value' => $ttoId],
+        ['action_type' => 'assign', 'field' => 'slas_id_ttr', 'value' => $ttrId],
+    ]);
+}
 
 echo PHP_EOL . "=== BUSINESS ROUTING RULES INITIALIZED ===" . PHP_EOL;

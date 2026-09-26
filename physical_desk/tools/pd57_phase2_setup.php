@@ -66,19 +66,32 @@ function getOrCreateLocation($name, $parent_id = 0, $comment = '') {
     ]);
 }
 
-// Helper to get or create SLA
-function getOrCreateSLA($name, $tto_min, $ttr_min, $comment = '') {
+// GLPI stores TTO and TTR as separate SLA records with distinct types.
+function getOrCreateSLAObjective($name, $type, $minutes, $comment = '') {
     $sla = new SLA();
     if ($sla->getFromDBByCrit(['name' => $name])) {
-        return $sla->fields['id'];
+        if ((int)$sla->fields['type'] !== $type
+            || (int)$sla->fields['number_time'] !== $minutes
+            || $sla->fields['definition_time'] !== 'minute') {
+            throw new RuntimeException("Existing SLA objective $name differs from PD57 policy");
+        }
+        return (int)$sla->fields['id'];
     }
-    return $sla->add([
-        'name' => $name,
-        'type' => SLM::TTR,
-        'number_time' => $ttr_min,
-        'definition_time' => 'minute',
-        'comment' => $comment
+    $id = $sla->add([
+        'name' => $name, 'type' => $type, 'number_time' => $minutes,
+        'definition_time' => 'minute', 'comment' => $comment,
     ]);
+    if (!$id) {
+        throw new RuntimeException("Could not create SLA objective $name");
+    }
+    return (int)$id;
+}
+
+function getOrCreateSLA($name, $tto_min, $ttr_min, $comment = '') {
+    $ttr = getOrCreateSLAObjective($name, SLM::TTR, $ttr_min, $comment);
+    $tto = getOrCreateSLAObjective($name . '_TTO', SLM::TTO, $tto_min, $comment);
+    echo "[VERIFIED] $name TTO=$tto_min minutes (#$tto), TTR=$ttr_min minutes (#$ttr)" . PHP_EOL;
+    return $ttr;
 }
 
 // ---------------------------------------------------------
