@@ -1,0 +1,37 @@
+# Keep the superseded checkout and ancillary image repository out of source exports.
+glpi-11.0-bugfixes/** export-ignore
+docker-images-main/** export-ignore
+engineering_logs/** export-ignore
+release_freezes/** export-ignore
+
+# Local credentials and sensitive runtime material must never enter a source archive.
+physical_desk/config/config_db.php export-ignore
+physical_desk/.env export-ignore
+physical_desk/.env.* export-ignore
+physical_desk/**/.env export-ignore
+physical_desk/**/.env.* export-ignore
+*.pem export-ignore
+*.key export-ignore
+*.p12 export-ignore
+*.pfx export-ignore
+id_rsa export-ignore
+id_ed25519 export-ignore
+
+# Retain these records locally, but exclude them from deployable source archives.
+physical_desk/release_freezes/** export-ignore
+physical_desk/engineering_logs/** export-ignore
+physical_desk/backups/** export-ignore
+physical_desk/backup/** export-ignore
+physical_desk/pd57_pre_migration_backup.sql export-ignore
+physical_desk/tests/** export-ignore
+physical_desk/Makefile export-ignore
+*.dump export-ignore
+*.sql.gz export-ignore
+physical_desk/**/__pycache__/** export-ignore
+*.pyc export-ignore
+*.log export-ignore
+*.tmp export-ignore
+*.bak export-ignore
+*.tar export-ignore
+*.tgz export-ignore
+*.zip export-ignore
