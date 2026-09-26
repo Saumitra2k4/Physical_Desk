@@ -1,0 +1,53 @@
+services:
+  app:
+    ports: !override
+      - "127.0.0.1:8080:80"
+    depends_on:
+      - db
+      - pd57-classifier
+    environment:
+      PD57_CLASSIFIER_URL: "http://pd57-classifier:5000"
+  mailpit:
+    ports: !override
+      - "127.0.0.1:8026:8025"
+  scheduler:
+    container_name: "pd57-scheduler"
+    build:
+      context: ".docker/app"
+      args:
+        PHP_VERSION: "8.4"
+    restart: unless-stopped
+    # Internal path /var/www/glpi is a Class C framework compat path
+    working_dir: /var/www/glpi
+    volumes:
+      - ".:/var/www/glpi:rw"
+    depends_on:
+      - db
+    command: ["sh", "-lc", "while true; do php front/cron.php || echo '[ERROR] PD57 automatic actions failed'; sleep 60; done"]
+  pd57-classifier:
+    container_name: "pd57-classifier"
+    build:
+      context: "./pd57-classifier"
+    restart: unless-stopped
+    volumes:
+      - "./pd57-classifier:/app:rw"
+    expose:
+      - "5000"
+    ports:
+      - "127.0.0.1:5057:5000"
+    environment:
+      PD57_CONFIDENCE_THRESHOLD: "0.45"
+      PD57_MAX_SUGGESTIONS: "3"
+      PD57_LOG_LEVEL: "INFO"
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:5000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s

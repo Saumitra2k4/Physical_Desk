@@ -1,12 +1,16 @@
+name: pd57
+
 services:
   app:
-    container_name: "glpi-app"
+    container_name: "pd57-app"
     build:
       context: ".docker/app"
       args:
         PHP_VERSION: "8.4"
     restart: "unless-stopped"
     volumes:
+      # Internal path /var/www/glpi is a Class C framework compat path
+      # (Apache DocumentRoot in base image requires it)
       - ".:/var/www/glpi:rw"
       - "custom_php_ini:/usr/local/etc/php/custom_conf.d/:rw"
     ports:
@@ -16,13 +20,12 @@ services:
     depends_on:
       - db
     environment:
-      # By default the testing env is exposed under the 8080 internal port
-      CYPRESS_BASE_URL: http://localhost:8080
+      PD57_BASE_URL: http://localhost:8080
     extra_hosts:
       - "host.docker.internal:host-gateway"
 
   db:
-    container_name: "glpi-db"
+    container_name: "pd57-db"
     image: "mariadb:11.8"
     restart: "unless-stopped"
     volumes:
@@ -30,14 +33,14 @@ services:
       - ".docker/initdb.sql:/docker-entrypoint-initdb.d/initdb.sql"
     environment:
       MARIADB_ROOT_PASSWORD: "glpi"
-      MARIADB_DATABASE: "glpi"
+      MARIADB_DATABASE: "pd57"
       MARIADB_USER: "glpi"
       MARIADB_PASSWORD: "glpi"
     expose:
       - "3306"
 
   mailpit:
-    container_name: "glpi-mailpit"
+    container_name: "pd57-mail"
     image: "axllent/mailpit"
     restart: "unless-stopped"
     expose:
@@ -46,29 +49,29 @@ services:
       - "8025:8025"
 
   dbgate:
-    container_name: "glpi-dbgate"
+    container_name: "pd57-dbgate"
     image: "dbgate/dbgate:latest"
     restart: "unless-stopped"
     ports:
       - "9000:3000"
     environment:
-      CONNECTIONS: "glpi"
+      CONNECTIONS: "pd57"
 
-      LABEL_glpi: "GLPI Mysql Server"
-      SERVER_glpi: "db"
-      USER_glpi: "glpi"
-      PASSWORD_glpi: "glpi"
-      PORT_glpi: 3306
-      ENGINE_glpi: "mysql@dbgate-plugin-mysql"
+      LABEL_pd57: "PD57 MariaDB Server"
+      SERVER_pd57: "db"
+      USER_pd57: "glpi"
+      PASSWORD_pd57: "glpi"
+      PORT_pd57: 3306
+      ENGINE_pd57: "mysql@dbgate-plugin-mysql"
 
-  # To create a preconfigured LDAP object in GLPI, run `make console c='tools:generate_dev_ldap'`
+  # LDAP (dev/testing only)
   openldap:
-    container_name: "glpi-openldap"
+    container_name: "pd57-openldap"
     image: "osixia/openldap:latest"
     restart: "unless-stopped"
     environment:
-      LDAP_ORGANISATION: "GLPI"
-      LDAP_DOMAIN: "glpi.org"
+      LDAP_ORGANISATION: "Physical Desk"
+      LDAP_DOMAIN: "pd57.local"
       LDAP_ADMIN_USERNAME: "admin"
       LDAP_ADMIN_PASSWORD: "admin"
     command: "--copy-service"
@@ -77,8 +80,13 @@ services:
       - "ldap_files:/var/lib/ldap:rw"
       - "ldap_config:/etc/ldap/slapd.d/:rw"
 
+networks:
+  default:
+    name: pd57-internal
+
 volumes:
   db:
   custom_php_ini:
   ldap_files:
   ldap_config:
+
