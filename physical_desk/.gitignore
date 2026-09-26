@@ -68,3 +68,5 @@ phpstan.neon
 # Runtime credentials must never enter a source archive.
 /config/config_db.php
 !/config/config_db.php.example
+/pd57-classifier/__pycache__/
+/tests/e2e/.env
