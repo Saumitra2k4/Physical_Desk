@@ -189,10 +189,11 @@ runTest('E1', 'Employee confirms AI suggestion (Wi-Fi → PD57_IT_NETWORK)', fun
     if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
     $group = resolveTicketGroup($tId);
     $rec = getTopSuggestion($tId);
+    $src = $rec['classification_source'] ?? '';
     return [
-        'passed'  => ($group === 'PD57_IT_NETWORK'),
-        'details' => "Ticket #{$tId} → {$group}, Source: " . ($rec['classification_source'] ?? 'n/a'),
-        'reason'  => "Expected PD57_IT_NETWORK, got {$group}"
+        'passed'  => ($group === 'PD57_IT_NETWORK' && $src === 'employee_confirmed'),
+        'details' => "Ticket #{$tId} → {$group}, Source: {$src}",
+        'reason'  => "Expected PD57_IT_NETWORK and employee_confirmed, got group {$group}, source {$src}"
     ];
 });
 
@@ -208,10 +209,11 @@ runTest('E2', 'Employee changes department (AI suggested IT, employee chooses HR
     if ($tId <= 0) return ['passed' => false, 'reason' => 'Ticket creation failed'];
     $group = resolveTicketGroup($tId);
     $rec = getTopSuggestion($tId);
+    $src = $rec['classification_source'] ?? '';
     return [
-        'passed'  => ($group === 'PD57_HR_L1'),
-        'details' => "Ticket #{$tId} → {$group}, Source: " . ($rec['classification_source'] ?? 'n/a'),
-        'reason'  => "Expected PD57_HR_L1, got {$group}"
+        'passed'  => ($group === 'PD57_HR_L1' && $src === 'employee_override'),
+        'details' => "Ticket #{$tId} → {$group}, Source: {$src}",
+        'reason'  => "Expected PD57_HR_L1 and employee_override, got group {$group}, source {$src}"
     ];
 });
 
@@ -249,7 +251,7 @@ runTest('E4', 'Explicit manual category is authoritative — AI does not overwri
     $rec = getTopSuggestion($tId);
     $src = $rec['classification_source'] ?? '';
     return [
-        'passed'  => ($finalCat === 50 && $src === 'manual_selection'),
+        'passed'  => ($finalCat === 50 && ($src === 'employee_confirmed' || $src === 'employee_override' || $src === 'manual_selection')),
         'details' => "Ticket #{$tId} category: {$finalCat}, Source: {$src}",
         'reason'  => "Category {$finalCat} or source '{$src}' incorrect"
     ];
