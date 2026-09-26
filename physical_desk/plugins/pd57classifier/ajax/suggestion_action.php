@@ -9,7 +9,8 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     echo json_encode(['error' => 'Method not allowed']);
     exit;
 }
-Session::checkCSRF($_POST);
+// GLPI's CheckCsrfListener validates and consumes the POST token before this
+// legacy plugin controller runs. A second check always rejects valid requests.
 $result = plugin_pd57classifier_apply_suggestion(
     (string)($_POST['action'] ?? ''),
     (int)($_POST['suggestion_id'] ?? 0),

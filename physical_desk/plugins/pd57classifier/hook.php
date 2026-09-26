@@ -282,7 +282,7 @@ function plugin_pd57classifier_item_add_ticket(Ticket $ticket): void
             'final_confirmed_category_id' => $finalCatId,
             'employee_changed_suggestion' => ($finalCatId > 0 && $topSuggestion && $finalCatId != $topSuggestion['category_id']) ? 1 : 0,
             'failure_reason'              => $classification['failure_reason'] ?? '',
-            'human_confirmed'             => 0,
+            'human_confirmed'             => ($finalCatId > 0 && (int)($suggestion['category_id'] ?? 0) === $finalCatId) ? 1 : 0,
             'human_override'              => 0,
             'date_creation'               => date('Y-m-d H:i:s'),
         ]);
@@ -341,7 +341,7 @@ function plugin_pd57classifier_apply_suggestion(
     if (!$suggestion) {
         return ['code' => 404, 'error' => 'Suggestion unavailable for this ticket'];
     }
-    if ((int)$suggestion['human_confirmed'] || (int)$suggestion['human_override']) {
+    if ($action === 'confirm' && ((int)$suggestion['human_confirmed'] || (int)$suggestion['human_override'])) {
         return ['code' => 409, 'error' => 'Suggestion already decided'];
     }
     $decided = $DB->request([
@@ -349,8 +349,11 @@ function plugin_pd57classifier_apply_suggestion(
         'WHERE' => ['tickets_id' => $ticketId, 'OR' => ['human_confirmed' => 1, 'human_override' => 1]],
         'LIMIT' => 1,
     ]);
-    if ($decided->count() > 0) {
+    if ($action === 'confirm' && ((int)$ticket->fields['itilcategories_id'] > 0 || $decided->count() > 0)) {
         return ['code' => 409, 'error' => 'Ticket classification already decided'];
+    }
+    if ($action === 'override' && (int)$ticket->fields['itilcategories_id'] > 0 && !$isAgent) {
+        return ['code' => 403, 'error' => 'Only an authorized agent can change a decided category'];
     }
     if ($action === 'confirm') {
         // The stored canonical path is the authority; the client ID is only an integrity check.
@@ -383,11 +386,16 @@ function plugin_pd57classifier_apply_suggestion(
     }
     $audit = $action === 'confirm'
         ? ['human_confirmed' => 1]
-        : ['human_override' => 1, 'override_category_id' => $categoryId,
+        : ['human_confirmed' => 0, 'human_override' => 1, 'override_category_id' => $categoryId,
            'override_user_id' => Session::getLoginUserID(), 'override_date' => date('Y-m-d H:i:s')];
     $audit['final_confirmed_category_id'] = $categoryId;
+    if ($action === 'override') {
+        $DB->update('glpi_plugin_pd57classifier_suggestions',
+            ['human_confirmed' => 0, 'human_override' => 0, 'final_confirmed_category_id' => $categoryId],
+            ['tickets_id' => $ticketId]);
+    }
     if (!$DB->update('glpi_plugin_pd57classifier_suggestions', $audit,
-        ['id' => $suggestionId, 'tickets_id' => $ticketId, 'human_confirmed' => 0, 'human_override' => 0])) {
+        ['id' => $suggestionId, 'tickets_id' => $ticketId])) {
         return ['code' => 500, 'error' => 'Ticket updated but audit persistence failed'];
     }
     Glpi\Event::log($ticketId, 'Ticket', 4, 'pd57classifier',

@@ -6,6 +6,10 @@
 !/plugins/.gitkeep
 !/plugins/pd57classifier/
 !/plugins/pd57classifier/**
+!/plugins/pd57auth/
+!/plugins/pd57auth/**
+!/plugins/pd57portal/
+!/plugins/pd57portal/**
 /files/*/*
 !/files/*/.gitkeep
 /.buildpath

@@ -1141,6 +1141,33 @@ class Auth extends CommonGLPI
                     Html::redirect($CFG_GLPI["root_doc"] . '/MFA/Setup');
                 }
             }
+
+            // PD57 Enterprise Email OTP intercept.
+            // Mirrors the TOTP MFA pattern above: after successful password auth,
+            // if pd57auth plugin is active and the user hasn't been redirected to TOTP,
+            // we intercept here to require a time-limited emailed OTP before the session is created.
+            if (
+                $this->auth_succeded
+                && !isAPI()
+                && !isCommandLine()
+                && $this->auth_type !== self::COOKIE
+                && !($_SESSION['pd57_otp_completed'] ?? false) // skip if OTP already verified this request
+                && Plugin::isPluginActive('pd57auth')
+                && function_exists('pd57auth_intercept_login')
+            ) {
+                // Note: pd57auth_intercept_login() MUST call Html::redirect() and never return.
+                // It generates the OTP, sends the email, stores pending state, and redirects.
+                // Session::init() is intentionally NOT called yet — the pending user is not authenticated.
+                pd57auth_intercept_login(
+                    $this->user,
+                    $this,
+                    $remember_me,
+                    $noauto,
+                    $_REQUEST['redirect'] ?? ''
+                );
+            }
+            // Clear the one-time OTP completion marker immediately after the guard check.
+            unset($_SESSION['pd57_otp_completed']);
         }
 
         // Log Event (if possible)

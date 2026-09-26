@@ -90,7 +90,7 @@ class PluginPd57classifierTicketSuggestion extends CommonDBTM
         $rows = [];
         foreach ($suggestions as $row) {
             $rows[] = $row;
-            if ($row['human_confirmed'] || $row['human_override']) {
+            if ($row['human_confirmed'] || $row['human_override'] || (int)$row['final_confirmed_category_id'] > 0) {
                 $hasConfirmed = true;
             }
         }
@@ -131,6 +131,9 @@ class PluginPd57classifierTicketSuggestion extends CommonDBTM
             } elseif ($row['human_override']) {
                 $status = '✏️ Overridden by Agent';
                 $statusClass = 'pd57-status-overridden';
+            } elseif ((int)$row['final_confirmed_category_id'] > 0) {
+                $status = 'Employee selected a category';
+                $statusClass = 'pd57-status-confirmed';
             }
 
             $sourceLabel = htmlspecialchars($row['classification_source'] ?? $row['source'] ?? 'classifier');
