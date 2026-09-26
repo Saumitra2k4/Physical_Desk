@@ -1,0 +1,436 @@
+"""
+PD57 Classifier Service
+=======================
+Local MiniLM-based zero-shot NLI classifier for Physical Desk ticket intake.
+
+Uses cross-encoder/nli-MiniLM2-L6-H768 to classify employee request text
+against the PD57 category taxonomy. Returns top-N scored suggestions with
+confidence values. Never blocks ticket creation — failures always fall back
+to "Manual Triage".
+
+Architecture:
+  - Single worker, single model instance (fits in ~300MB RAM)
+  - No external API calls — fully offline after build
+  - Stateless — every request is independent
+  - Human-in-the-loop: suggestions are NEVER auto-applied
+"""
+
+import logging
+import os
+import time
+from typing import Optional
+
+import numpy as np
+import torch
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+# ---------------------------------------------------------------------------
+# Configuration
+# ---------------------------------------------------------------------------
+
+MODEL_NAME = os.getenv("PD57_MODEL", "cross-encoder/nli-MiniLM2-L6-H768")
+CONFIDENCE_THRESHOLD = float(os.getenv("PD57_CONFIDENCE_THRESHOLD", "0.45"))
+MAX_SUGGESTIONS = int(os.getenv("PD57_MAX_SUGGESTIONS", "3"))
+LOG_LEVEL = os.getenv("PD57_LOG_LEVEL", "INFO")
+
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL),
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger("pd57-classifier")
+
+# ---------------------------------------------------------------------------
+# PD57 Category Taxonomy — mirrors glpi_itilcategories
+# ---------------------------------------------------------------------------
+# Each entry maps a category_id (from GLPI) to its human-readable label
+# used as the NLI hypothesis. The label is written as a natural-language
+# statement for better zero-shot performance.
+
+CATEGORY_LABELS: dict[int, dict] = {
+    # --- HR ---
+    4:  {"hypothesis": "This is about requesting time off or leave from work.",
+         "name": "Leave Request", "path": "HR > Leave & Attendance > Leave Request"},
+    5:  {"hypothesis": "This is about correcting attendance records or clock-in errors.",
+         "name": "Attendance Correction", "path": "HR > Leave & Attendance > Attendance Correction"},
+    6:  {"hypothesis": "This is about work shifts, scheduling, or roster queries.",
+         "name": "Shift / Schedule Query", "path": "HR > Leave & Attendance > Shift / Schedule Query"},
+    7:  {"hypothesis": "This is about employee personal records, documents, or files.",
+         "name": "Employee Records", "path": "HR > Employee Records"},
+    8:  {"hypothesis": "This is about employee benefits, insurance, or perks.",
+         "name": "Benefits", "path": "HR > Benefits"},
+    9:  {"hypothesis": "This is about hiring, recruitment, or onboarding new employees.",
+         "name": "Hiring & Onboarding", "path": "HR > Hiring & Onboarding"},
+    10: {"hypothesis": "This is about workplace conflicts, harassment, wellbeing, or people support.",
+         "name": "Workplace / People Support", "path": "HR > Workplace / People Support"},
+    11: {"hypothesis": "This is about HR policies, company handbook, or general HR questions.",
+         "name": "Policy / HR Query", "path": "HR > Policy / HR Query"},
+    12: {"hypothesis": "This is a general HR question not covered by other categories.",
+         "name": "Other HR", "path": "HR > Other HR"},
+
+    # --- IT ---
+    14: {"hypothesis": "This is a general IT help desk or tech support request.",
+         "name": "Service Desk / General Support", "path": "IT > Service Desk / General Support"},
+    16: {"hypothesis": "This is about a laptop or desktop computer issue.",
+         "name": "Laptop / Desktop", "path": "IT > Hardware > Laptop / Desktop"},
+    17: {"hypothesis": "This is about a printer issue or printing problem.",
+         "name": "Printer", "path": "IT > Hardware > Printer"},
+    18: {"hypothesis": "This is about a computer peripheral like mouse, keyboard, monitor, or headset.",
+         "name": "Peripheral", "path": "IT > Hardware > Peripheral"},
+    19: {"hypothesis": "This is about a point-of-sale terminal or check-in kiosk device.",
+         "name": "POS / Check-in Device", "path": "IT > Hardware > POS / Check-in Device"},
+    21: {"hypothesis": "This is about Wi-Fi connectivity or wireless network issues.",
+         "name": "Wi-Fi", "path": "IT > Network > Wi-Fi"},
+    22: {"hypothesis": "This is about internet connectivity or browsing issues.",
+         "name": "Internet", "path": "IT > Network > Internet"},
+    23: {"hypothesis": "This is about wired network, LAN, or ethernet connectivity.",
+         "name": "LAN / Connectivity", "path": "IT > Network > LAN / Connectivity"},
+    24: {"hypothesis": "This is about network equipment like routers, switches, or access points.",
+         "name": "Network Equipment", "path": "IT > Network > Network Equipment"},
+    26: {"hypothesis": "This is about password reset, login issues, or forgotten credentials.",
+         "name": "Password / Login", "path": "IT > Identity & Access > Password / Login"},
+    27: {"hypothesis": "This is about requesting access or permissions to systems or folders.",
+         "name": "Permission / Access", "path": "IT > Identity & Access > Permission / Access"},
+    28: {"hypothesis": "This is about creating a new user account or system access for a new employee.",
+         "name": "New Account", "path": "IT > Identity & Access > New Account"},
+    29: {"hypothesis": "This is about an account that is locked out or disabled.",
+         "name": "Account Lockout", "path": "IT > Identity & Access > Account Lockout"},
+    31: {"hypothesis": "This is about a suspicious email, phishing attempt, or email scam.",
+         "name": "Suspicious Email / Phishing", "path": "IT > Cybersecurity > Suspicious Email / Phishing"},
+    32: {"hypothesis": "This is about account security, unauthorized access, or compromised credentials.",
+         "name": "Account Security", "path": "IT > Cybersecurity > Account Security"},
+    33: {"hypothesis": "This is about device security, malware, virus, or endpoint protection.",
+         "name": "Device Security", "path": "IT > Cybersecurity > Device Security"},
+    34: {"hypothesis": "This is about a cybersecurity incident or data breach.",
+         "name": "Security Incident", "path": "IT > Cybersecurity > Security Incident"},
+    35: {"hypothesis": "This is about a software application, app installation, or software issue.",
+         "name": "Applications / Software", "path": "IT > Applications / Software"},
+    36: {"hypothesis": "This is about point-of-sale systems or member check-in software.",
+         "name": "POS / Check-in Systems", "path": "IT > POS / Check-in Systems"},
+    37: {"hypothesis": "This is about audio or visual equipment in a studio, like speakers or screens.",
+         "name": "Studio Audio / Visual", "path": "IT > Studio Audio / Visual"},
+    38: {"hypothesis": "This is about CCTV cameras, surveillance, or security camera systems.",
+         "name": "CCTV / Security Systems", "path": "IT > CCTV / Security Systems"},
+    39: {"hypothesis": "This is a general IT question not covered by other categories.",
+         "name": "Other IT", "path": "IT > Other IT"},
+
+    # --- Payroll ---
+    41: {"hypothesis": "This is about salary, pay rate, or compensation questions.",
+         "name": "Salary", "path": "Payroll > Salary"},
+    42: {"hypothesis": "This is about expense reimbursement or travel expense claims.",
+         "name": "Reimbursement", "path": "Payroll > Reimbursement"},
+    43: {"hypothesis": "This is about viewing or accessing a payslip or pay statement.",
+         "name": "Payslip", "path": "Payroll > Payslip"},
+    44: {"hypothesis": "This is about payroll deductions, garnishments, or withholdings.",
+         "name": "Deduction", "path": "Payroll > Deduction"},
+    45: {"hypothesis": "This is about changing bank account or payment details for salary.",
+         "name": "Bank / Payment Details", "path": "Payroll > Bank / Payment Details"},
+    46: {"hypothesis": "This is about tax forms, tax withholding, or payroll documentation.",
+         "name": "Tax / Payroll Documentation", "path": "Payroll > Tax / Payroll Documentation"},
+    47: {"hypothesis": "This is a general payroll question not covered by other categories.",
+         "name": "Other Payroll", "path": "Payroll > Other Payroll"},
+
+    # --- Operations ---
+    50: {"hypothesis": "This is about barre exercise equipment in the fitness studio.",
+         "name": "Barre Equipment", "path": "Operations > Studio Equipment > Barre Equipment"},
+    51: {"hypothesis": "This is about weights, dumbbells, or free weight equipment.",
+         "name": "Weights / Dumbbells", "path": "Operations > Studio Equipment > Weights / Dumbbells"},
+    52: {"hypothesis": "This is about resistance bands, cables, or resistance training equipment.",
+         "name": "Resistance Equipment", "path": "Operations > Studio Equipment > Resistance Equipment"},
+    53: {"hypothesis": "This is about exercise mats, yoga props, or group class equipment.",
+         "name": "Exercise / Class Equipment", "path": "Operations > Studio Equipment > Exercise / Class Equipment"},
+    54: {"hypothesis": "This is about treadmills, bikes, rowing machines, or cardio equipment.",
+         "name": "Cardio Equipment", "path": "Operations > Studio Equipment > Cardio Equipment"},
+    55: {"hypothesis": "This is about other fitness equipment not specifically categorised.",
+         "name": "Other Fitness Equipment", "path": "Operations > Studio Equipment > Other Fitness Equipment"},
+    57: {"hypothesis": "This is about heating, ventilation, air conditioning, or temperature issues.",
+         "name": "HVAC / AC", "path": "Operations > Facility Maintenance > HVAC / AC"},
+    58: {"hypothesis": "This is about electrical issues, power outage, or lighting problems.",
+         "name": "Electrical", "path": "Operations > Facility Maintenance > Electrical"},
+    59: {"hypothesis": "This is about plumbing, water leak, or bathroom facilities issues.",
+         "name": "Plumbing / Water", "path": "Operations > Facility Maintenance > Plumbing / Water"},
+    60: {"hypothesis": "This is about door locks, key cards, access control, or building entry.",
+         "name": "Access Control", "path": "Operations > Facility Maintenance > Access Control"},
+    61: {"hypothesis": "This is about general building maintenance, repairs, or facility issues.",
+         "name": "General Facility", "path": "Operations > Facility Maintenance > General Facility"},
+    62: {"hypothesis": "This is about cleaning, housekeeping, or hygiene in the facility.",
+         "name": "Housekeeping", "path": "Operations > Housekeeping"},
+    63: {"hypothesis": "This is about ordering supplies, inventory management, or stock replenishment.",
+         "name": "Supplies / Inventory", "path": "Operations > Supplies / Inventory"},
+    64: {"hypothesis": "This is about a vendor, supplier, or third-party service issue.",
+         "name": "Vendor Issue", "path": "Operations > Vendor Issue"},
+    65: {"hypothesis": "This is about day-to-day studio operations, class scheduling, or studio logistics.",
+         "name": "Studio Operations", "path": "Operations > Studio Operations"},
+    66: {"hypothesis": "This is about a safety incident, injury, accident, or operational emergency.",
+         "name": "Safety / Operational Incident", "path": "Operations > Safety / Operational Incident"},
+    67: {"hypothesis": "This is a general operations question not covered by other categories.",
+         "name": "Other Operations", "path": "Operations > Other Operations"},
+
+    # --- Other ---
+    69: {"hypothesis": "This is a general request or question that does not fit any specific department.",
+         "name": "General Request", "path": "Other > General Request"},
+}
+
+# The fallback category when confidence is too low or classifier fails
+MANUAL_TRIAGE_CATEGORY_ID = 70
+MANUAL_TRIAGE_INFO = {
+    "category_id": MANUAL_TRIAGE_CATEGORY_ID,
+    "name": "Manual Triage",
+    "path": "Other > Manual Triage",
+    "confidence": 0.0,
+    "source": "fallback",
+}
+
+
+# ---------------------------------------------------------------------------
+# Pydantic Models
+# ---------------------------------------------------------------------------
+
+class ClassifyRequest(BaseModel):
+    """Incoming classification request from GLPI."""
+    text: str = Field(..., min_length=3, max_length=5000,
+                      description="The employee's request text (title + description).")
+    top_n: int = Field(default=MAX_SUGGESTIONS, ge=1, le=10,
+                       description="Number of suggestions to return.")
+    threshold: Optional[float] = Field(default=None, ge=0.0, le=1.0,
+                                        description="Override confidence threshold.")
+
+
+class CategorySuggestion(BaseModel):
+    """A single category suggestion with confidence score."""
+    category_id: int
+    name: str
+    path: str
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    source: str = "classifier"
+
+
+class ClassifyResponse(BaseModel):
+    """Classification response returned to GLPI."""
+    model_config = {"protected_namespaces": ()}
+    suggestions: list[CategorySuggestion]
+    needs_human_review: bool = True  # ALWAYS true — human-in-the-loop
+    fallback_used: bool = False
+    model_name: str = MODEL_NAME
+    inference_time_ms: float = 0.0
+
+
+class HealthResponse(BaseModel):
+    """Health check response."""
+    model_config = {"protected_namespaces": ()}
+    status: str
+    model_loaded: bool
+    model_name: str
+    category_count: int
+    version: str = "1.0.0"
+
+
+# ---------------------------------------------------------------------------
+# FastAPI App
+# ---------------------------------------------------------------------------
+
+app = FastAPI(
+    title="PD57 Classifier",
+    description="Local MiniLM request classifier for Physical Desk / PD57",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["POST", "GET"],
+    allow_headers=["*"],
+)
+
+# Global cold-start timing metrics
+_process_start_time = time.time()
+_model_load_start_time = 0.0
+_model_load_end_time = 0.0
+_model_load_time = 0.0
+_model = None
+_tokenizer = None
+_model_ready = False
+
+
+def _load_model():
+    """Load the cross-encoder model. Called once at startup."""
+    global _model, _tokenizer, _model_ready, _model_load_start_time, _model_load_end_time, _model_load_time
+    try:
+        logger.info("Loading model: %s (HF_HUB_OFFLINE=%s)", MODEL_NAME, os.getenv("HF_HUB_OFFLINE", "0"))
+        _model_load_start_time = time.time()
+        try:
+            _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME, local_files_only=True)
+            _model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME, local_files_only=True)
+        except Exception:
+            logger.warning("local_files_only failed, trying default load...")
+            _tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+            _model = AutoModelForSequenceClassification.from_pretrained(MODEL_NAME)
+        _model.eval()
+        _model_load_end_time = time.time()
+        _model_load_time = _model_load_end_time - _model_load_start_time
+        _model_ready = True
+        logger.info("Model loaded in %.2fs (total readiness from process start: %.2fs)",
+                    _model_load_time, _model_load_end_time - _process_start_time)
+    except Exception:
+        logger.exception("FATAL: Failed to load model")
+        _model_ready = False
+
+
+@app.on_event("startup")
+async def startup_event():
+    _load_model()
+
+
+@app.get("/health", response_model=HealthResponse)
+async def health():
+    """Health check endpoint."""
+    return HealthResponse(
+        status="ok" if _model_ready else "degraded",
+        model_loaded=_model_ready,
+        model_name=MODEL_NAME,
+        category_count=len(CATEGORY_LABELS),
+    )
+
+
+@app.get("/health/ready")
+async def health_ready():
+    """Readiness probe endpoint. Returns 200 when model is loaded, 530/503 otherwise."""
+    if _model_ready and _model is not None:
+        readiness_duration = round(_model_load_end_time - _process_start_time, 2)
+        return {
+            "status": "ready",
+            "model_name": MODEL_NAME,
+            "readiness_time_s": readiness_duration,
+            "model_load_time_s": round(_model_load_time, 2),
+            "offline_mode": os.getenv("HF_HUB_OFFLINE") == "1" or os.getenv("TRANSFORMERS_OFFLINE") == "1",
+        }
+    raise HTTPException(status_code=503, detail="Model loading in progress or failed")
+
+def _classify(text: str, top_n: int, threshold: float) -> list[CategorySuggestion]:
+    """
+    Run zero-shot NLI classification across PD57 categories.
+    Uses binary entailment probability vs contradiction for each category hypothesis.
+    """
+    if not _model_ready or _model is None or _tokenizer is None:
+        return []
+
+    category_ids = list(CATEGORY_LABELS.keys())
+    hypotheses = [CATEGORY_LABELS[cid]["hypothesis"] for cid in category_ids]
+
+    # Build premise-hypothesis pairs
+    pairs = [(text, h) for h in hypotheses]
+
+    inputs = _tokenizer(
+        pairs,
+        padding=True,
+        truncation=True,
+        max_length=256,
+        return_tensors="pt",
+    )
+
+    with torch.no_grad():
+        logits = _model(**inputs).logits  # shape: (N, 3)
+
+    # NLI labels for MiniLM: 0=contradiction, 1=entailment, 2=neutral
+    # Compute binary entailment score vs contradiction: P(entailment) / (P(entailment) + P(contradiction))
+    con_logits = logits[:, 0]
+    ent_logits = logits[:, 1]
+    binary_probs = torch.softmax(torch.stack([con_logits, ent_logits], dim=1), dim=1)[:, 1].numpy()
+
+    scored = []
+    for idx, cid in enumerate(category_ids):
+        score = float(binary_probs[idx])
+        if score >= threshold:
+            scored.append(CategorySuggestion(
+                category_id=cid,
+                name=CATEGORY_LABELS[cid]["name"],
+                path=CATEGORY_LABELS[cid]["path"],
+                confidence=round(score, 4),
+                source="classifier",
+            ))
+
+    # Sort by confidence descending, take top_n
+    scored.sort(key=lambda s: s.confidence, reverse=True)
+    return scored[:top_n]
+
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+@app.get("/health", response_model=HealthResponse)
+async def health():
+    """Health check endpoint."""
+    return HealthResponse(
+        status="ok" if _model_ready else "degraded",
+        model_loaded=_model_ready,
+        model_name=MODEL_NAME,
+        category_count=len(CATEGORY_LABELS),
+    )
+
+
+@app.post("/v1/classify", response_model=ClassifyResponse)
+async def classify(req: ClassifyRequest):
+    """
+    Classify employee request text and return category suggestions.
+
+    Always returns needs_human_review=True — the classifier is an assistant,
+    not the final authority. If the classifier fails or returns no results
+    above threshold, the Manual Triage fallback is used.
+    """
+    threshold = req.threshold if req.threshold is not None else CONFIDENCE_THRESHOLD
+    start = time.time()
+
+    try:
+        suggestions = _classify(req.text, req.top_n, threshold)
+        elapsed_ms = (time.time() - start) * 1000
+
+        if not suggestions:
+            # Below threshold or model failure → Manual Triage fallback
+            logger.info("No suggestions above threshold (%.2f) for text: %.80s...",
+                       threshold, req.text)
+            return ClassifyResponse(
+                suggestions=[CategorySuggestion(**MANUAL_TRIAGE_INFO)],
+                needs_human_review=True,
+                fallback_used=True,
+                inference_time_ms=round(elapsed_ms, 1),
+            )
+
+        logger.info("Classified in %.1fms: top=%s (%.3f) for: %.80s...",
+                    elapsed_ms, suggestions[0].name, suggestions[0].confidence, req.text)
+
+        return ClassifyResponse(
+            suggestions=suggestions,
+            needs_human_review=True,
+            fallback_used=False,
+            inference_time_ms=round(elapsed_ms, 1),
+        )
+
+    except Exception:
+        elapsed_ms = (time.time() - start) * 1000
+        logger.exception("Classification failed — returning Manual Triage fallback")
+        return ClassifyResponse(
+            suggestions=[CategorySuggestion(**MANUAL_TRIAGE_INFO)],
+            needs_human_review=True,
+            fallback_used=True,
+            inference_time_ms=round(elapsed_ms, 1),
+        )
+
+
+@app.get("/v1/categories")
+async def list_categories():
+    """Return the full category taxonomy the classifier knows about."""
+    return {
+        "categories": [
+            {"category_id": cid, "name": info["name"], "path": info["path"]}
+            for cid, info in sorted(CATEGORY_LABELS.items())
+        ],
+        "fallback": {
+            "category_id": MANUAL_TRIAGE_CATEGORY_ID,
+            "name": "Manual Triage",
+            "path": "Other > Manual Triage",
+        },
+        "total": len(CATEGORY_LABELS),
+    }
