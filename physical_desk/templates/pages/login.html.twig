@@ -34,32 +34,63 @@
 
 {% block content_block %}
     <style>
-      body.welcome-anonymous{background:#fbf8f6;color:#252331}
-      .page-anonymous .container-tight{max-width:520px!important}
-      .page-anonymous .main-content-card{border:1px solid #ece5e6;border-radius:20px;box-shadow:0 24px 65px #35233312;overflow:hidden}
-      .page-anonymous .main-content-card .card-body{padding:32px 35px 38px}
-      .page-anonymous .main-content-card .col-md-5{width:100%;max-width:100%}
-      .page-anonymous .main-content-card .card-header{border:0;background:transparent;padding:0;display:block!important}
-      .page-anonymous .main-content-card h2{font-size:29px;letter-spacing:-.05em;color:#252331;font-weight:750}
-      .page-anonymous .form-control{border-radius:10px;padding:12px 14px;border-color:#dfd7dc}
-      .page-anonymous .form-control:focus{border-color:#e75582;box-shadow:0 0 0 3px #e7558222}
-      .page-anonymous .btn-primary{background:#e75582;border-color:#e75582;border-radius:10px;padding:12px}
-      .page-anonymous .btn-primary:hover{background:#bd365f;border-color:#bd365f}
-      .pd57-login-intro{color:#77737e;margin:-11px 0 28px;text-align:center;font-size:14px}
-      .pd57-login-eyebrow{color:#bd365f;font-size:11px;text-align:center;letter-spacing:.17em;font-weight:800;margin-bottom:7px}
-      .page-anonymous .forgot_password a,.page-anonymous .main-content-card a{color:#bd365f}
-    </style>
+      .pd57-login-eyebrow { color: var(--pd57-cyan-deep); font-size: 11px; letter-spacing: .14em; font-weight: 750; margin: 0 0 10px; text-transform: uppercase; }
+      .page-anonymous .main-content-card .row { margin: 0; }
+      .page-anonymous .main-content-card .col-md-5 { max-width: none; padding: 0; width: 100%; }
+      .page-anonymous .main-content-card h2 { color: var(--pd57-ink); font-size: clamp(30px, 4vw, 40px); letter-spacing: -.045em; margin: 0; font-weight: 720; }
+      .pd57-login-intro { color: var(--pd57-steel); margin: 10px 0 32px; font-size: 14px; line-height: 1.6; }
+      .page-anonymous .form-label { color: #2b343a; font-size: 13px; font-weight: 650; margin-bottom: 8px; }
+      .page-anonymous .form-control { min-height: 48px; border-radius: 8px; padding: 11px 13px; border: 1px solid #cbd3d8; background: #fff; color: var(--pd57-ink); }
+      .page-anonymous .form-control:hover { border-color: #9ca8b0; }
+      .page-anonymous .form-control:focus { border-color: var(--pd57-cyan-deep); box-shadow: 0 0 0 3px rgba(101,200,232,.18); }
+      .page-anonymous .form-check-input { border-color: #9ca8b0; }
+      .page-anonymous .form-check-input:checked { background-color: var(--pd57-cyan-deep); border-color: var(--pd57-cyan-deep); }
+      .page-anonymous .btn-primary { min-height: 48px; background: var(--pd57-ink); border: 1px solid var(--pd57-ink); border-radius: 8px; padding: 11px 16px; font-weight: 700; }
+      .page-anonymous .btn-primary:hover { background: var(--pd57-charcoal); border-color: var(--pd57-charcoal); }
+      .page-anonymous .btn-primary:focus-visible, .page-anonymous a:focus-visible, .page-anonymous input:focus-visible { outline: 3px solid rgba(101,200,232,.5); outline-offset: 2px; }
+      .page-anonymous .forgot_password a, .page-anonymous .main-content-card a { color: var(--pd57-cyan-deep); font-weight: 600; text-underline-offset: 3px; }
+      .pd57-login-options { align-items: center; display: flex; justify-content: space-between; gap: 16px; margin: 4px 0 24px; }
+      .pd57-login-options .mb-2 { margin: 0 !important; }
+      @media (max-width: 430px) { .pd57-login-options { align-items: flex-start; flex-direction: column; gap: 10px; } }
+
+      /* PD57_SIGNIN_WHITE_BUTTON_V1 */
+      .page-anonymous .btn-primary {
+          background: #ffffff !important;
+          color: #14191e !important;
+          border: 1px solid #cbd2d8 !important;
+          box-shadow: none !important;
+      }
+
+      .page-anonymous .btn-primary:hover,
+      .page-anonymous .btn-primary:focus,
+      .page-anonymous .btn-primary:focus-visible {
+          background: #ffffff !important;
+          color: #14191e !important;
+          border-color: #45cce9 !important;
+          box-shadow:
+              0 0 0 3px rgba(69, 204, 233, 0.18),
+              0 8px 24px rgba(69, 204, 233, 0.18) !important;
+      }
+
+      .page-anonymous .btn-primary:active {
+          background: #f6f7f8 !important;
+          color: #14191e !important;
+          border-color: #167c92 !important;
+          box-shadow:
+              0 0 0 2px rgba(69, 204, 233, 0.14) !important;
+      }
+</style>
     <form action="{{ path('front/login.php') }}" method="post" autocomplete="off" data-submit-once>
         <input type="hidden" name="noAUTO" value="{{ noAuto }}"/>
         <input type="hidden" name="redirect" value="{{ redirect }}"/>
         <input type="hidden" name="_glpi_csrf_token" value="{{ csrf_token() }}"/>
         <div class="row justify-content-center">
             <div class="col-md-5">
-                <div class="card-header mb-4">
-                    <p class="pd57-login-eyebrow">YOUR WORKSPACE</p>
-                    <h2 class="mx-auto text-center">Welcome to Physical Desk</h2>
+                <div class="pd57-login-heading">
+                    <p class="pd57-login-eyebrow">Secure workspace</p>
+                    <h2>Sign in to PD57</h2>
                 </div>
-                <p class="pd57-login-intro">Sign in to request help and stay on top of every update.</p>
+                <p class="pd57-login-intro">Use your work account to create requests and follow every update.</p>
                 <div class="mb-3">
                     <label class="form-label" for="login_name">Work email or username</label>
                     <input type="text" class="form-control" id="login_name" name="login_name" placeholder=""/>
@@ -74,25 +105,27 @@
                 </div>
 
 
-                {% if config('login_remember_time') %}
+                <div class="pd57-login-options">
+                  {% if config('login_remember_time') %}
                     <div class="mb-2">
                         <label class="form-check" for="login_remember">
                             <input type="checkbox" class="form-check-input" id="login_remember" name="login_remember" {{ config('login_remember_default') ? 'checked' : '' }}/>
                             <span class="form-check-label">{{ __('Remember me') }}</span>
                         </label>
                     </div>
-                {% endif %}
+                  {% endif %}
+                  {% if show_lost_password %}
+                    <div class="forgot_password">
+                      <a href="{{ path('front/lostpassword.php?lostpassword=1') }}">{{ __('Forgotten password?') }}</a>
+                    </div>
+                  {% endif %}
+                </div>
 
                 <div class="form-footer">
                     <button type="submit" name="submit" class="btn btn-primary w-100 mb-2">
                         {{ __('Sign in') }}
                     </button>
                     {% if show_lost_password %}
-                        <div class="ms-auto text-center forgot_password">
-                            <a href="{{ path('front/lostpassword.php?lostpassword=1') }}">
-                                {{ __('Forgotten password?') }}
-                            </a>
-                        </div>
                         {% if config('display_login_source') %}
                             <script>
                                 $(() => {
@@ -131,7 +164,7 @@
 {% endblock %}
 
 {% block footer_block %}
-    <span>Physical Desk · <a href="{{ path('/front/about.php') }}">Open source notices</a></span>
+    <span>Physical Desk · <a href="/plugins/pd57portal/front/open_source_notices.php">Open source notices</a></span>
 
     {% if must_call_cron %}
         <div style="background-image: url('{{ path('/front/cron.php') }}');"></div>

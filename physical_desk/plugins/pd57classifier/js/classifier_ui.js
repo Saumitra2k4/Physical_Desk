@@ -70,3 +70,360 @@
         });
     });
 })();
+
+/* ==========================================================
+   PD57_AI_PRODUCTIZATION_V1
+   ========================================================== */
+
+(() => {
+    "use strict";
+
+    const polishPd57Ai = () => {
+
+        document
+            .querySelectorAll("h3")
+            .forEach((heading) => {
+
+                const text =
+                    (heading.textContent || "").trim();
+
+                if (
+                    !text.includes(
+                        "AI Category Suggestions"
+                    )
+                ) {
+                    return;
+                }
+
+                heading.textContent =
+                    "AI Category Suggestions";
+
+                const root =
+                    heading.closest(
+                        ".card, .tab-pane, .tab_cadre_fixe"
+                    )
+                    || heading.parentElement;
+
+                if (root) {
+                    root.classList.add(
+                        "pd57-ai-polished"
+                    );
+                }
+            });
+
+        /*
+         * Preserve the useful Answer workflow.
+         *
+         * Do not simply rename Cancel ticket to Resolved,
+         * because its behavior would still mean cancellation.
+         * It stays hidden until the actual employee-confirmed
+         * resolution/escalation loop is implemented.
+         */
+        document
+            .querySelectorAll(
+                "a, button, [role='button']"
+            )
+            .forEach((element) => {
+
+                const text =
+                    (element.textContent || "")
+                        .trim()
+                        .toLowerCase();
+
+                if (text === "cancel ticket") {
+
+                    element.classList.add(
+                        "pd57-native-cancel-hidden"
+                    );
+
+                    element.setAttribute(
+                        "aria-hidden",
+                        "true"
+                    );
+                }
+            });
+    };
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        polishPd57Ai
+    );
+
+    const observer =
+        new MutationObserver(
+            polishPd57Ai
+        );
+
+    observer.observe(
+        document.documentElement,
+        {
+            childList: true,
+            subtree: true
+        }
+    );
+
+    polishPd57Ai();
+})();
+/* ==========================================================
+   PD57_NATIVE_RESOLUTION_AND_RERANK_V1
+   ========================================================== */
+
+(() => {
+    "use strict";
+
+    const addResolveAction = () => {
+
+        if (
+            !location.pathname.includes(
+                "/front/ticket.form.php"
+            )
+        ) {
+            return;
+        }
+
+        if (
+            document.getElementById(
+                "pd57-native-resolve"
+            )
+        ) {
+            return;
+        }
+
+        const id =
+            new URLSearchParams(
+                location.search
+            ).get("id");
+
+        if (!id) {
+            return;
+        }
+
+        const answer =
+            Array.from(
+                document.querySelectorAll(
+                    "a, button"
+                )
+            ).find(
+                (element) =>
+                    (element.textContent || "")
+                        .trim()
+                        .toLowerCase()
+                    === "answer"
+            );
+
+        if (!answer) {
+            return;
+        }
+
+        const link =
+            document.createElement(
+                "a"
+            );
+
+        link.id =
+            "pd57-native-resolve";
+
+        link.href =
+            `/plugins/pd57portal/front/ticket.php?id=${encodeURIComponent(id)}`;
+
+        link.textContent =
+            "Resolve request";
+
+        link.className =
+            `${answer.className || ""} ms-2`
+                .trim();
+
+        link.style.textDecoration =
+            "none";
+
+        answer.insertAdjacentElement(
+            "afterend",
+            link
+        );
+    };
+
+
+    const rerankSalary = () => {
+
+        const heading =
+            Array.from(
+                document.querySelectorAll(
+                    "h3"
+                )
+            ).find(
+                (element) =>
+                    (element.textContent || "")
+                        .includes(
+                            "AI Category Suggestions"
+                        )
+            );
+
+        if (!heading) {
+            return;
+        }
+
+        const panel =
+            heading.closest(
+                ".pd57-ai-polished, .card, .tab-pane, .tab_cadre_fixe"
+            )
+            || heading.parentElement;
+
+        if (!panel) {
+            return;
+        }
+
+        /*
+         * Build context without the AI panel itself, otherwise
+         * the candidate row text could trigger the rule.
+         */
+        const bodyClone =
+            document.body.cloneNode(
+                true
+            );
+
+        bodyClone
+            .querySelectorAll(
+                ".pd57-ai-polished"
+            )
+            .forEach(
+                (element) =>
+                    element.remove()
+            );
+
+        const context =
+            (bodyClone.textContent || "")
+                .toLowerCase();
+
+        if (
+            !/\b(salary|salary not received|salary not credited|wages?|pay not received|pay not credited)\b/i.test(
+                context
+            )
+        ) {
+            return;
+        }
+
+        const tbody =
+            panel.querySelector(
+                "tbody"
+            );
+
+        if (!tbody) {
+            return;
+        }
+
+        const rows =
+            Array.from(
+                tbody.querySelectorAll(
+                    "tr"
+                )
+            );
+
+        const payrollSalary =
+            rows.find((row) => {
+
+                const text =
+                    (row.textContent || "")
+                        .toLowerCase();
+
+                return (
+                    text.includes(
+                        "payroll"
+                    ) &&
+                    text.includes(
+                        "salary"
+                    )
+                );
+            });
+
+        if (!payrollSalary) {
+            return;
+        }
+
+        if (
+            tbody.firstElementChild !==
+            payrollSalary
+        ) {
+            tbody.insertBefore(
+                payrollSalary,
+                tbody.firstElementChild
+            );
+        }
+
+        payrollSalary.classList.add(
+            "pd57-domain-priority"
+        );
+
+        const firstCell =
+            payrollSalary.querySelector(
+                "td"
+            );
+
+        if (
+            firstCell &&
+            !firstCell.querySelector(
+                ".pd57-domain-match-label"
+            )
+        ) {
+
+            const badge =
+                document.createElement(
+                    "span"
+                );
+
+            badge.className =
+                "pd57-domain-match-label";
+
+            badge.textContent =
+                "Strong domain match";
+
+            badge.style.display =
+                "block";
+
+            badge.style.marginTop =
+                "5px";
+
+            badge.style.fontSize =
+                "10px";
+
+            badge.style.fontWeight =
+                "700";
+
+            badge.style.letterSpacing =
+                ".04em";
+
+            badge.style.color =
+                "#167c92";
+
+            firstCell.appendChild(
+                badge
+            );
+        }
+    };
+
+
+    const run = () => {
+
+        addResolveAction();
+
+        rerankSalary();
+    };
+
+
+    document.addEventListener(
+        "DOMContentLoaded",
+        () => {
+
+            run();
+
+            setTimeout(
+                run,
+                400
+            );
+
+            setTimeout(
+                run,
+                1200
+            );
+        }
+    );
+})();

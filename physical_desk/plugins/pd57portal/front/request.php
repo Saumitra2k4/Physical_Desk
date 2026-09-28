@@ -1,51 +1,7 @@
 <?php
-require_once dirname(__DIR__) . '/inc/portal.php';
-if (pd57_is_agent()) { http_response_code(403); exit('Employee request form only'); }
-$error = '';
-if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $title = trim((string)($_POST['name'] ?? ''));
-    $content = trim((string)($_POST['content'] ?? ''));
-    $categoryId = (int)($_POST['itilcategories_id'] ?? 0);
-    $locationId = (int)($_POST['locations_id'] ?? 0);
-    $category = new ITILCategory();
-    $location = new Location();
-    if (mb_strlen($title) < 5 || mb_strlen($title) > 180 || mb_strlen($content) < 10) {
-        $error = 'Add a clear title and at least 10 characters of detail.';
-    } elseif (!$category->getFromDB($categoryId) || !(int)$category->fields['is_helpdeskvisible']
-        || !Session::haveAccessToEntity((int)$category->fields['entities_id'], (bool)$category->fields['is_recursive'])) {
-        $error = 'Choose a category to confirm where this request should go.';
-    } elseif ($locationId && (!$location->getFromDB($locationId)
-        || !Session::haveAccessToEntity((int)$location->fields['entities_id'], (bool)$location->fields['is_recursive']))) {
-        $error = 'Choose a valid location.';
-    } else {
-        $ticket = new Ticket();
-        $id = $ticket->add(['name' => $title, 'content' => $content, 'type' => Ticket::INCIDENT_TYPE,
-            'urgency' => 3, 'impact' => 3, 'entities_id' => $_SESSION['glpiactive_entity'] ?? 0,
-            'locations_id' => $locationId, 'itilcategories_id' => $categoryId,
-            'users_id_recipient' => Session::getLoginUserID(), '_users_id_requester' => Session::getLoginUserID()]);
-        if ($id) { Html::redirect(pd57_url('ticket', ['id' => $id, 'created' => 1])); }
-        $error = 'Your request could not be saved. Please try again.';
-    }
-}
-pd57_layout_start('Create a Request', 'request');
-echo '<section class="hero compact"><div><p class="eyebrow">NEW REQUEST</p><h1>Tell us what you need.</h1><p>A few details help the right team pick this up quickly.</p></div></section>';
-echo '<div class="form-grid"><section class="panel form-panel"><form method="post" id="request-form">';
-echo '<input type="hidden" name="_glpi_csrf_token" value="' . pd57_h(Session::getNewCSRFToken()) . '">';
-if ($error) { echo '<div class="alert" role="alert">' . pd57_h($error) . '</div>'; }
-echo '<label for="name">Request title</label><input id="name" name="name" maxlength="180" required minlength="5" value="' . pd57_h($_POST['name'] ?? '') . '" placeholder="e.g. Studio Wi-Fi is not connecting">';
-echo '<label for="content">Description</label><textarea id="content" name="content" rows="6" required minlength="10" placeholder="What happened, when, and how is it affecting your work?">' . pd57_h($_POST['content'] ?? '') . '</textarea>';
-echo '<label for="location">Location</label><select id="location" name="locations_id"><option value="0">Choose a location (optional)</option>';
-foreach ($DB->request(['FROM' => 'glpi_locations', 'ORDER' => ['completename ASC']]) as $location) {
-    echo '<option value="' . (int)$location['id'] . '"' . ((int)($_POST['locations_id'] ?? 0) === (int)$location['id'] ? ' selected' : '') . '>' . pd57_h($location['completename']) . '</option>';
-}
-echo '</select><div class="field-heading"><label for="category">Category and department</label><button type="button" id="suggest-button" class="text-link">Suggest a category</button></div>';
-echo '<div id="suggestions" class="suggestions" aria-live="polite">Describe your request, then choose a suggestion or select a category yourself.</div>';
-echo '<select id="category" name="itilcategories_id" required><option value="">Choose or confirm a category</option>';
-foreach ($DB->request(['FROM' => 'glpi_itilcategories', 'WHERE' => ['is_helpdeskvisible' => 1], 'ORDER' => ['completename ASC']]) as $category) {
-    echo '<option value="' . (int)$category['id'] . '"' . ((int)($_POST['itilcategories_id'] ?? 0) === (int)$category['id'] ? ' selected' : '') . '>' . pd57_h($category['completename']) . '</option>';
-}
-echo '</select><p class="hint">Your selection controls routing. The suggested category is never applied without your choice.</p>';
-echo '<button class="button button-primary submit" type="submit">Submit Request <span>↗</span></button></form></section>';
-echo '<aside class="panel aside"><p class="eyebrow">WHAT HAPPENS NEXT</p><h2>A clear path to help.</h2><ol><li>You choose the best category.</li><li>We route the request to the right team.</li><li>Track status and response targets in My Requests.</li></ol><div class="aside-note">Unsure which team? Choose Other › Manual Triage.</div></aside></div>';
-echo '<script src="/plugins/pd57portal/js/request.js" defer></script>';
-pd57_layout_end();
+require_once dirname(__DIR__) . '/inc/portal.php'; require_once dirname(__DIR__) . '/inc/request_draft.php'; require_once dirname(__DIR__,2) . '/pd57classifier/hook.php';
+if(pd57_is_agent()){http_response_code(403);exit('Employee request form only');}$error='';$draft=null;
+if($_SERVER['REQUEST_METHOD']==='POST'&&isset($_POST['preview_request'])){$name=trim((string)$_POST['name']);$content=trim((string)$_POST['content']);if(mb_strlen($name)<5||mb_strlen($content)<10)$error='Add a clear title and at least 10 characters of detail.';else{$text=$name.' '.strip_tags($content);$r=pd57_p4_preview_classification($text);$h=$r['hierarchy']??[];$d=(string)($h['department']??'Other / unknown');$t=(string)($h['team']??'Employee Services Desk');$y=(string)($h['request_type']??'Manual Triage');if(!pd57_p4_valid_hierarchy($d,$t,$y)){[$d,$t,$y]=['Other / unknown','Employee Services Desk','Manual Triage'];}$token=pd57_draft_create(['name'=>$name,'content'=>$content,'locations_id'=>(int)($_POST['locations_id']??0)],['department'=>$d,'team'=>$t,'request_type'=>$y,'confidence'=>(float)($h['confidence']??0)],pd57_p4_priority($name.' '.strip_tags($content),$y));Html::redirect(pd57_url('request',['draft'=>$token]));}}
+if($_SERVER['REQUEST_METHOD']==='POST'&&isset($_POST['confirm_request'])){$draft=pd57_draft_get((string)$_POST['draft_token']);$d=(string)$_POST['department'];$t=(string)$_POST['team'];$y=(string)$_POST['request_type'];if(!$draft)$error='This request preview expired or was already submitted.';elseif(!pd57_p4_valid_hierarchy($d,$t,$y))$error='Choose a valid department, team, and request type combination.';else{$categoryId=pd57_p4_category_id_for_hierarchy($d,$t,$y);if($categoryId<=0){$error='The confirmed request category is not configured. Please contact the Employee Services Desk.';}else{$_SESSION['pd57_forced_hierarchy']=['department'=>$d,'team'=>$t,'request_type'=>$y,'confidence'=>$draft['suggestion']['confidence'],'category_id'=>$categoryId];$ticket=new Ticket();$id=$ticket->add(['name'=>$draft['values']['name'],'content'=>$draft['values']['content'],'type'=>Ticket::INCIDENT_TYPE,'urgency'=>3,'impact'=>3,'entities_id'=>$_SESSION['glpiactive_entity']??0,'locations_id'=>$draft['values']['locations_id'],'users_id_recipient'=>Session::getLoginUserID(),'_users_id_requester'=>Session::getLoginUserID(),'itilcategories_id'=>$categoryId,'_disablenotif'=>1]);unset($_SESSION['pd57_forced_hierarchy']);if($id){pd57_p4_confirm_hierarchy((int)$id,['department'=>$d,'team'=>$t,'request_type'=>$y],$draft['suggestion']['department']===$d&&$draft['suggestion']['team']===$t&&$draft['suggestion']['request_type']===$y?'employee_confirmed':'employee_corrected_hierarchy');pd57_draft_consume((string)$_POST['draft_token']);Html::redirect(pd57_url('ticket',['id'=>$id,'created'=>1]));}$error='Your request could not be saved.';}}}
+if(isset($_GET['draft']))$draft=pd57_draft_get((string)$_GET['draft']);pd57_layout_start($draft?'Confirm request':'Create a Request','request');echo '<section class="panel form-panel">';if($error)echo '<div class="alert">'.pd57_h($error).'</div>';
+if($draft){$x=pd57_p4_taxonomy();$s=$draft['suggestion'];$json=json_encode($x,JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_THROW_ON_ERROR);echo '<h1>Confirm request details</h1><form method="post"><input type="hidden" name="_glpi_csrf_token" value="'.pd57_h(Session::getNewCSRFToken()).'"><input type="hidden" name="draft_token" value="'.pd57_h((string)$_GET['draft']).'"><p>'.nl2br(pd57_h($draft['values']['content'])).'</p><label>Department</label><select id="department" name="department">';foreach($x as $k=>$v)echo '<option'.($k===$s['department']?' selected':'').'>'.pd57_h($k).'</option>';echo '</select><label>Team</label><select id="team" name="team">';foreach($x[$s['department']] as $k=>$v)echo '<option'.($k===$s['team']?' selected':'').'>'.pd57_h($k).'</option>';echo '</select><label>Request Type</label><select id="request_type" name="request_type">';foreach($x[$s['department']][$s['team']] as $v)echo '<option'.($v===$s['request_type']?' selected':'').'>'.pd57_h($v).'</option>';echo '</select><p><strong>Priority</strong><br>'.pd57_h($draft['priority']['priority']).'</p><p><strong>Priority Assessment</strong><br>'.pd57_h($draft['priority']['summary']).'</p><button class="button button-primary" name="confirm_request" value="1">Submit Request</button></form><script>const pd57Hierarchy='.$json.';const d=document.querySelector("#department"),t=document.querySelector("#team"),r=document.querySelector("#request_type");function fill(el,items,keep){el.innerHTML="";Object.keys(items).forEach(k=>{const o=document.createElement("option");o.value=o.textContent=k;if(k===keep)o.selected=true;el.appendChild(o)});}function teams(){fill(t,pd57Hierarchy[d.value],"");types()}function types(){fill(r,(pd57Hierarchy[d.value][t.value]||[]).reduce((a,v)=>(a[v]=v,a),{}),"")}d.addEventListener("change",teams);t.addEventListener("change",types);</script>';}else{echo '<h1>Tell us what you need.</h1><form method="post"><input type="hidden" name="_glpi_csrf_token" value="'.pd57_h(Session::getNewCSRFToken()).'"><label>Request title</label><input name="name" required minlength="5"><label>Description</label><textarea name="content" rows="6" required minlength="10"></textarea><label>Location</label><select name="locations_id"><option value="0">Choose a location</option>';foreach($DB->request(['FROM'=>'glpi_locations','ORDER'=>['completename ASC']]) as $location){$entityId=(int)($location['entities_id']??0);$recursive=(bool)($location['is_recursive']??0);if(!Session::haveAccessToEntity($entityId,$recursive))continue;$selected=((int)($_POST['locations_id']??0)===(int)$location['id'])?' selected':'';echo '<option value="'.(int)$location['id'].'"'.$selected.'>'.pd57_h((string)$location['completename']).'</option>';}echo '</select><button class="button button-primary" name="preview_request" value="1">Review request</button></form>';}echo '</section>';pd57_layout_end();

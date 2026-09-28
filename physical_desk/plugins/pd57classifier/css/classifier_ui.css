@@ -75,3 +75,79 @@
 .pd57-confirm-btn {
     white-space: nowrap;
 }
+
+/* ==========================================================
+   PD57_AI_PRODUCTIZATION_V1
+   ========================================================== */
+
+.pd57-ai-polished {
+    background: #ffffff !important;
+    border: 1px solid #dde2e6 !important;
+    border-radius: 10px !important;
+    box-shadow: none !important;
+    color: #14191e !important;
+    margin-top: 16px !important;
+    padding: 20px !important;
+}
+
+.pd57-ai-polished h3 {
+    color: #14191e !important;
+    font-size: 17px !important;
+    font-weight: 680 !important;
+    letter-spacing: -0.02em !important;
+    margin: 0 0 16px !important;
+}
+
+.pd57-ai-polished table {
+    border: 1px solid #e3e7ea !important;
+    border-collapse: separate !important;
+    border-radius: 8px !important;
+    border-spacing: 0 !important;
+    overflow: hidden;
+    width: 100% !important;
+}
+
+.pd57-ai-polished th {
+    background: #f6f7f8 !important;
+    border-bottom: 1px solid #dde2e6 !important;
+    color: #4c5863 !important;
+    font-size: 11px !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.04em !important;
+    padding: 10px 12px !important;
+    text-transform: uppercase;
+}
+
+.pd57-ai-polished td {
+    border-bottom: 1px solid #edf0f2 !important;
+    color: #252c33 !important;
+    padding: 11px 12px !important;
+    vertical-align: top !important;
+}
+
+.pd57-ai-polished tr:last-child td {
+    border-bottom: 0 !important;
+}
+
+.pd57-ai-polished code {
+    background: #f2f4f5 !important;
+    border: 1px solid #e1e5e8 !important;
+    border-radius: 5px !important;
+    color: #4c5863 !important;
+    font-size: 11px !important;
+    padding: 2px 5px !important;
+}
+
+.pd57-ai-polished strong {
+    color: #14191e !important;
+}
+
+.pd57-ai-polished .badge {
+    box-shadow: none !important;
+}
+
+.pd57-native-cancel-hidden {
+    display: none !important;
+}
+
+/* Deliberately no gradients or glass effects. */

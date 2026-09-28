@@ -1,5 +1,12 @@
 <?php
 
+/*
+ * PD57_PRODUCTION_ENV_HARD_LOCK
+ * Public staging never runs GLPI development tooling.
+ */
+if (!defined('GLPI_ENVIRONMENT_TYPE')) {
+    define('GLPI_ENVIRONMENT_TYPE', 'production');
+}
 /**
  * ---------------------------------------------------------------------
  *

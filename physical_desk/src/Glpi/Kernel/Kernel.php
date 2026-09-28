@@ -150,7 +150,14 @@ final class Kernel extends BaseKernel
 
         $bundles[] = new FrameworkBundle();
 
-        if (Environment::get()->shouldEnableExtraDevAndDebugTools()) {
+        /*
+         * PD57_DISABLE_DEV_PROFILER_BUNDLES
+         *
+         * Physical Desk staging is product-facing.
+         * Symfony WebProfilerBundle / DebugBundle must never
+         * render on this runtime.
+         */
+        if (false && Environment::get()->shouldEnableExtraDevAndDebugTools()) {
             $dev_bundles_classes = [
                 WebProfilerBundle::class,
                 DebugBundle::class,

@@ -100,6 +100,25 @@ function pd57auth_get_otp_delivery_address(string $username): string
         return $envAddr;
     }
 
+    // A PD57 person may be linked to a logical GLPI identity. This lookup is
+    // contact routing only: group membership remains the authorization source.
+    global $DB;
+    if (isset($DB) && $DB->tableExists('glpi_plugin_pd57portal_people')) {
+        $user = $DB->request([
+            'SELECT' => ['id'], 'FROM' => 'glpi_users',
+            'WHERE' => ['name' => $username, 'is_active' => 1], 'LIMIT' => 1,
+        ])->current();
+        if ($user) {
+            $person = $DB->request([
+                'SELECT' => ['delivery_email'], 'FROM' => 'glpi_plugin_pd57portal_people',
+                'WHERE' => ['linked_users_id' => (int)$user['id'], 'is_active' => 1], 'LIMIT' => 1,
+            ])->current();
+            if ($person && filter_var($person['delivery_email'], FILTER_VALIDATE_EMAIL)) {
+                return (string)$person['delivery_email'];
+            }
+        }
+    }
+
     // Final fallback: GLPI admin email (delivers to Mailpit in local dev)
     global $CFG_GLPI;
     return $CFG_GLPI["admin_email"] ?? "pd57-otp@physicaldesk.test";
@@ -285,23 +304,15 @@ function pd57auth_send_otp_email(string $delivery_address, string $otp, string $
             "This code is valid for " . $expiry_minutes . " minutes.",
             "Do not share this code with anyone.",
             "",
-            "If you did not initiate this login, please contact your IT administrator immediately.",
+            "If you did not request this, ignore this email.",
             "",
             "— Physical Desk Security",
         ]);
 
         $email->text($text);
         // HTML version with the code formatted prominently but without exposing it in logs
-        $email->html(
-            "<html><body>" .
-            "<h2>Physical Desk / PD57 Login Verification</h2>" .
-            "<p>Your one-time verification code is:</p>" .
-            "<h1 style=\"letter-spacing:8px;font-family:monospace;color:#1a1a2e;\">" . htmlspecialchars($otp) . "</h1>" .
-            "<p>This code is valid for <strong>" . $expiry_minutes . " minutes</strong>.</p>" .
-            "<p><strong>Do not share this code with anyone.</strong></p>" .
-            "<p>If you did not initiate this login, contact your IT administrator immediately.</p>" .
-            "</body></html>"
-        );
+        $safeCode = htmlspecialchars($otp, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+        $email->html('<!doctype html><html><body style="margin:0;background:#f4f6f7;color:#25313b;font-family:Arial,sans-serif"><table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:32px 16px"><table role="presentation" width="560" cellpadding="0" cellspacing="0" style="max-width:560px;background:#fff;border:1px solid #dbe2e6"><tr><td style="padding:28px 32px;border-top:4px solid #17b8c8"><p style="margin:0 0 8px;font-size:12px;letter-spacing:1px;color:#60717c">PHYSICAL DESK / PD57</p><h1 style="margin:0 0 20px;font-size:24px;color:#24313a">Verify your sign-in</h1><p>Your one-time security code is:</p><p style="margin:20px 0;padding:16px;text-align:center;background:#f4fafa;border:1px solid #b9e7eb;font:700 30px monospace;letter-spacing:8px;color:#24313a">'.$safeCode.'</p><p>This code expires in <strong>'.$expiry_minutes.' minutes</strong>. Do not share it with anyone.</p><p style="color:#60717c">If you did not request this, ignore this email.</p></td></tr></table></td></tr></table></body></html>');
 
         return $mailer->send();
     } catch (Throwable $e) {

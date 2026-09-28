@@ -67,6 +67,102 @@
 
 {{ include('layout/parts/head.html.twig') }}
 <body class="welcome-anonymous">
+   <style>
+      :root {
+         --pd57-ink: #11161a;
+         --pd57-charcoal: #20282e;
+         --pd57-steel: #65717b;
+         --pd57-line: #dce2e6;
+         --pd57-canvas: #f4f6f7;
+         --pd57-cyan: #65c8e8;
+         --pd57-cyan-deep: #14788e;
+      }
+      * { box-sizing: border-box; }
+      body.welcome-anonymous {
+         background: var(--pd57-canvas);
+         color: var(--pd57-ink);
+         font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         margin: 0;
+      }
+      .page-anonymous { min-height: 100vh; }
+      .page-anonymous > .flex-fill { min-height: 100vh; padding: 24px !important; margin: 0 !important; }
+      .page-anonymous .container-tight { max-width: 1120px !important; width: 100%; padding: 0 !important; }
+      .pd57-auth-shell {
+         display: grid;
+         grid-template-columns: minmax(320px, .9fr) minmax(420px, 1.1fr);
+         min-height: min(720px, calc(100vh - 48px));
+         overflow: hidden;
+         background: #fff;
+         border: 1px solid var(--pd57-line);
+         border-radius: 16px;
+         box-shadow: 0 24px 70px rgba(17, 22, 26, .10);
+      }
+      .pd57-auth-brand {
+         position: relative;
+         overflow: hidden;
+         display: flex;
+         flex-direction: column;
+         justify-content: space-between;
+         padding: clamp(32px, 5vw, 64px);
+         background: var(--pd57-ink);
+         color: #fff;
+      }
+      .pd57-auth-brand::before,
+      .pd57-auth-brand::after {
+         content: "";
+         position: absolute;
+         pointer-events: none;
+      }
+      .pd57-auth-brand::before {
+         width: 280px;
+         height: 1px;
+         right: -54px;
+         top: 34%;
+         background: rgba(101, 200, 232, .65);
+         transform: rotate(-38deg);
+      }
+      .pd57-auth-brand::after {
+         width: 190px;
+         height: 190px;
+         right: -84px;
+         bottom: 54px;
+         border: 1px solid rgba(255, 255, 255, .14);
+         border-radius: 50%;
+         box-shadow: 0 0 0 44px rgba(255, 255, 255, .025), 0 0 0 88px rgba(255, 255, 255, .018);
+      }
+      .pd57-wordmark { display: inline-flex; align-items: center; gap: 13px; color: #fff; text-decoration: none; position: relative; z-index: 1; }
+      .pd57-mark { display: grid; grid-template-columns: repeat(2, 1fr); width: 48px; height: 48px; border: 1px solid rgba(255,255,255,.38); }
+      .pd57-mark span { display: grid; place-items: center; font-size: 14px; line-height: 1; font-weight: 800; }
+      .pd57-mark .pd57-number { background: var(--pd57-cyan); color: var(--pd57-ink); }
+      .pd57-wordmark-copy strong { display: block; font-size: 18px; letter-spacing: .08em; line-height: 1.05; }
+      .pd57-wordmark-copy small { display: block; margin-top: 5px; color: #aab4bb; font-size: 10px; letter-spacing: .16em; text-transform: uppercase; }
+      .pd57-auth-statement { position: relative; z-index: 1; max-width: 430px; }
+      .pd57-kicker { color: var(--pd57-cyan); font-size: 11px; font-weight: 750; letter-spacing: .16em; text-transform: uppercase; }
+      .pd57-auth-statement h1 { color: #fff; font-size: clamp(34px, 4.2vw, 58px); line-height: 1.02; letter-spacing: -.055em; margin: 16px 0 20px; }
+      .pd57-auth-statement p { color: #c4cbd0; font-size: 15px; line-height: 1.7; margin: 0; max-width: 370px; }
+      .pd57-auth-meta { position: relative; z-index: 1; display: flex; flex-wrap: wrap; gap: 10px 24px; color: #8f9aa2; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
+      .pd57-auth-main { display: grid; align-content: center; padding: clamp(32px, 6vw, 80px); min-width: 0; }
+      .pd57-auth-main-inner { width: 100%; max-width: 440px; margin: auto; }
+      .page-anonymous .main-content-card { border: 0; border-radius: 0; box-shadow: none; background: transparent; margin: 0; }
+      .page-anonymous .main-content-card .card-header { display: none; }
+      .page-anonymous .main-content-card .card-body { padding: 0; }
+      .pd57-auth-footer { color: #77828a; font-size: 12px; margin-top: 24px; }
+      .pd57-auth-footer a { color: var(--pd57-charcoal); text-decoration: underline; text-underline-offset: 3px; }
+      @media (max-width: 820px) {
+         .page-anonymous > .flex-fill { padding: 0 !important; }
+         .pd57-auth-shell { grid-template-columns: 1fr; min-height: 100vh; border: 0; border-radius: 0; box-shadow: none; }
+         .pd57-auth-brand { min-height: 250px; padding: 28px clamp(24px, 7vw, 52px); }
+         .pd57-auth-statement h1 { font-size: clamp(30px, 8vw, 44px); margin: 20px 0 10px; }
+         .pd57-auth-statement p { display: none; }
+         .pd57-auth-meta { margin-top: 24px; }
+         .pd57-auth-main { padding: 40px clamp(24px, 7vw, 52px) 32px; }
+      }
+      @media (max-width: 430px) {
+         .pd57-auth-brand { min-height: 220px; }
+         .pd57-auth-meta span:last-child { display: none; }
+         .pd57-auth-main { align-content: start; }
+      }
+   </style>
    <div class="skip-links">
       <a class="visually-hidden-focusable skip-link" href="#page">{{ __('Go to main content') }}</a>
    </div>
@@ -80,22 +176,34 @@
             {% set style = 'max-width: 60rem' %}
          {% endif %}
 
-         <div class="container-tight py-6" {% if style is not null %}style="{{ style }}"{% endif %}>
-            <div class="text-center">
-               <div class="col-md">
-                  <span class="glpi-logo mb-4" title="Physical Desk (PD57)"></span>
+         <div class="container-tight" {% if style is not null %}style="{{ style }}"{% endif %}>
+            <div class="pd57-auth-shell">
+               <section class="pd57-auth-brand" aria-label="Physical Desk">
+                  <a class="pd57-wordmark" href="{{ path('/') }}" aria-label="PD57 home">
+                     <span class="pd57-mark" aria-hidden="true"><span>PD</span><span class="pd57-number">57</span></span>
+                     <span class="pd57-wordmark-copy"><strong>PD57</strong><small>Physical Desk</small></span>
+                  </a>
+                  <div class="pd57-auth-statement">
+                     <span class="pd57-kicker">Employee Request Management</span>
+                     <h1>Clear requests.<br>Accountable action.</h1>
+                     <p>One calm, reliable place to request support, follow progress, and close the loop.</p>
+                  </div>
+                  <div class="pd57-auth-meta"><span>Secure access</span><span>Visible ownership</span><span>Measurable response</span></div>
+               </section>
+               <section class="pd57-auth-main">
+                  <div class="pd57-auth-main-inner">
+                     <div class="card card-md main-content-card">
+                        {# Keep the header on one line so that the :empty CSS selector will work #}
+                        <div class="card-header">{% block header_block %}{% endblock %}</div>
+                        <div class="card-body">
+                           {% block content_block %}{% endblock %}
+                        </div>
+                     </div>
+                     <div class="pd57-auth-footer">
+                        {% block footer_block %}{% endblock %}
+                     </div>
+                  </div>
                </div>
-            </div>
-            <div class="card card-md main-content-card">
-               {# Keep the header on one line so that the :empty CSS selector will work #}
-               <div class="card-header">{% block header_block %}{% endblock %}</div>
-               <div class="card-body">
-                  {% block content_block %}{% endblock %}
-               </div>
-            </div>
-
-            <div class="text-center text-muted mt-3">
-               {% block footer_block %}{% endblock %}
             </div>
          </div>
       </div>

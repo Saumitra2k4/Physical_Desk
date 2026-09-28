@@ -181,69 +181,61 @@ if (isset($_GET["send_error"])) {
 }
 
 // ----- Render the OTP form -----
-$title = "Verify Your Identity — Physical Desk";
-
-// Build a simple secure OTP form (no full GLPI page_header as user isn't authenticated)
-echo "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n";
-echo "<meta charset=\"UTF-8\">\n";
-echo "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n";
-echo "<title>" . htmlspecialchars($title) . "</title>\n";
-echo "<style>\n";
-echo "body { margin:0; font-family:Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; background:#fbf8f6; color:#252331; display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; box-sizing:border-box; }\n";
-echo ".card { background:#fff; border:1px solid #ece5e6; border-radius:20px; padding:38px; max-width:430px; width:100%; box-shadow:0 24px 65px #35233312; }\n";
-echo ".brand {font-size:20px;font-weight:800;letter-spacing:-.05em;margin-bottom:28px}.mark{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:11px;background:#252331;color:#fff;margin-right:9px}.eyebrow{color:#bd365f;font-size:11px;letter-spacing:.16em;font-weight:800;margin:0 0 8px;text-transform:uppercase}\n";
-echo "h2 { margin:0 0 8px; font-size:1.8rem; letter-spacing:-.05em; font-weight:750; color:#252331; }\n";
-echo "p.sub { margin:0 0 27px; font-size:0.9rem; color:#77737e; line-height:1.55; }\n";
-echo "label { display:block; margin-bottom:8px; font-size:0.8rem; font-weight:700; color:#5c5660; }\n";
-echo "input[type=text] { width:100%; box-sizing:border-box; background:#fff; border:1px solid #ded7dd; border-radius:10px; color:#252331; padding:12px 16px; font-size:1.5rem; letter-spacing:8px; text-align:center; }\n";
-echo "input[type=text]:focus { outline:none; border-color:#e75582; box-shadow:0 0 0 3px #e7558222; }\n";
-echo ".btn-primary { display:block; width:100%; background:#e75582; color:#fff; border:none; border-radius:10px; padding:13px; font-size:.95rem; font-weight:700; cursor:pointer; margin-top:16px; }\n";
-echo ".btn-primary:hover { background:#bd365f; }\n";
-echo ".btn-ghost { background:transparent; border:1px solid #e7dfe3; color:#6f6771; border-radius:10px; padding:10px; width:100%; font-size:0.85rem; cursor:pointer; margin-top:10px; }\n";
-echo ".btn-ghost:hover { border-color:#e75582; color:#bd365f; }\n";
-echo ".error { background:#fff0f0; border-radius:8px; padding:12px 16px; margin-bottom:16px; color:#a13e4e; font-size:0.875rem; }\n";
-echo ".info { background:#f7edf0; border-radius:8px; padding:12px 16px; margin-bottom:16px; color:#9d3154; font-size:0.875rem; }\n";
-echo ".divider { height:1px; background:#ece5e6; margin:20px 0; }\n";
-echo ".hint { font-size:0.8rem; color:#9f979e; margin-top:16px; text-align:center; }\n";
-echo "</style>\n";
-echo "</head>\n<body>\n";
-echo "<div class=\"card\">\n";
-echo "<div class=\"brand\"><span class=\"mark\">P</span>Physical Desk</div>\n";
-echo "<p class=\"eyebrow\">ONE MORE STEP</p>\n";
-echo "<h2>Verify your sign-in</h2>\n";
-echo "<p class=\"sub\">A 6-digit code has been sent to the email on file for <strong>" . htmlspecialchars($username) . "</strong>. Enter it below to complete sign-in.</p>\n";
-
-if ($error_msg) {
-    echo "<div class=\"error\">" . htmlspecialchars($error_msg) . "</div>\n";
-}
-if ($info_msg) {
-    echo "<div class=\"info\">" . htmlspecialchars($info_msg) . "</div>\n";
-}
-
+$title = "Verify your sign-in — PD57";
 $token = Session::getNewCSRFToken();
-
-// Verify form
-echo "<form method=\"post\" autocomplete=\"off\">\n";
-echo "<input type=\"hidden\" name=\"_glpi_csrf_token\" value=\"" . htmlspecialchars($token) . "\">\n";
-echo "<label for=\"pd57_otp_code\">Verification Code</label>\n";
-echo "<input type=\"text\" id=\"pd57_otp_code\" name=\"pd57_otp_code\" maxlength=\"6\" pattern=\"[0-9]{6}\" placeholder=\"000000\" inputmode=\"numeric\" autofocus>\n";
-echo "<button type=\"submit\" name=\"pd57_otp_submit\" class=\"btn-primary\">Verify & Sign In</button>\n";
-echo "</form>\n";
-
-echo "<div class=\"divider\"></div>\n";
-
-// Resend form (separate form with its own CSRF)
-echo "<form method=\"post\">\n";
-echo "<input type=\"hidden\" name=\"_glpi_csrf_token\" value=\"" . htmlspecialchars($token) . "\">\n";
-echo "<button type=\"submit\" name=\"pd57_otp_resend\" class=\"btn-ghost\">&#8635; Resend Code</button>\n";
-echo "</form>\n";
-
-// Cancel form
-echo "<form method=\"post\">\n";
-echo "<input type=\"hidden\" name=\"_glpi_csrf_token\" value=\"" . htmlspecialchars($token) . "\">\n";
-echo "<button type=\"submit\" name=\"pd57_otp_cancel\" class=\"btn-ghost\">&#8592; Cancel &amp; Return to Login</button>\n";
-echo "</form>\n";
-
-echo "<p class=\"hint\">Code valid for " . PD57_AUTH_OTP_EXPIRY_MINUTES . " minutes &bull; Check spam if not received</p>\n";
-
-echo "</div>\n</body>\n</html>\n";
+$safeUsername = htmlspecialchars((string)$username, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$safeToken = htmlspecialchars((string)$token, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$safeError = htmlspecialchars($error_msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$safeInfo = htmlspecialchars($info_msg, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$expiryMinutes = (int)PD57_AUTH_OTP_EXPIRY_MINUTES;
+?>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex, nofollow">
+    <title><?= htmlspecialchars($title, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></title>
+    <style>
+        :root{--ink:#11161a;--charcoal:#20282e;--steel:#65717b;--line:#dce2e6;--canvas:#f4f6f7;--cyan:#65c8e8;--cyan-deep:#14788e;--danger:#a32929}
+        *{box-sizing:border-box}body{margin:0;min-height:100vh;background:var(--canvas);color:var(--ink);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:24px;display:grid;place-items:center}
+        .shell{display:grid;grid-template-columns:minmax(320px,.9fr) minmax(420px,1.1fr);width:min(1120px,100%);min-height:min(720px,calc(100vh - 48px));overflow:hidden;background:#fff;border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 70px rgba(17,22,26,.10)}
+        .brand-panel{position:relative;overflow:hidden;display:flex;flex-direction:column;justify-content:space-between;padding:clamp(32px,5vw,64px);background:var(--ink);color:#fff}.brand-panel:before{content:"";position:absolute;width:280px;height:1px;right:-54px;top:34%;background:rgba(101,200,232,.65);transform:rotate(-38deg)}.brand-panel:after{content:"";position:absolute;width:190px;height:190px;right:-84px;bottom:54px;border:1px solid rgba(255,255,255,.14);border-radius:50%;box-shadow:0 0 0 44px rgba(255,255,255,.025),0 0 0 88px rgba(255,255,255,.018)}
+        .wordmark{display:inline-flex;align-items:center;gap:13px;color:#fff;position:relative;z-index:1}.mark{display:grid;grid-template-columns:repeat(2,1fr);width:48px;height:48px;border:1px solid rgba(255,255,255,.38)}.mark span{display:grid;place-items:center;font-size:14px;font-weight:800}.mark .number{background:var(--cyan);color:var(--ink)}.wordmark-copy strong{display:block;font-size:18px;letter-spacing:.08em;line-height:1.05}.wordmark-copy small{display:block;margin-top:5px;color:#aab4bb;font-size:10px;letter-spacing:.16em;text-transform:uppercase}
+        .statement{position:relative;z-index:1;max-width:430px}.kicker,.eyebrow{color:var(--cyan);font-size:11px;font-weight:750;letter-spacing:.16em;text-transform:uppercase}.statement h1{color:#fff;font-size:clamp(34px,4.2vw,58px);line-height:1.02;letter-spacing:-.055em;margin:16px 0 20px}.statement p{color:#c4cbd0;font-size:15px;line-height:1.7;margin:0;max-width:370px}.brand-meta{position:relative;z-index:1;color:#8f9aa2;font-size:11px;letter-spacing:.06em;text-transform:uppercase}
+        .main{display:grid;align-content:center;padding:clamp(32px,6vw,80px);min-width:0}.content{width:100%;max-width:440px;margin:auto}.eyebrow{color:var(--cyan-deep);margin:0 0 10px}.content h2{font-size:clamp(30px,4vw,40px);letter-spacing:-.045em;margin:0;font-weight:720}.sub{color:var(--steel);margin:10px 0 28px;font-size:14px;line-height:1.6}.sub strong{color:var(--charcoal)}
+        label{display:block;margin-bottom:8px;color:#2b343a;font-size:13px;font-weight:650}.otp{width:100%;min-height:62px;border:1px solid #cbd3d8;border-radius:8px;background:#fff;color:var(--ink);padding:10px 16px;font-size:28px;font-weight:700;letter-spacing:.34em;text-align:center}.otp:hover{border-color:#9ca8b0}.otp:focus{outline:none;border-color:var(--cyan-deep);box-shadow:0 0 0 3px rgba(101,200,232,.18)}
+        button{width:100%;min-height:48px;border-radius:8px;padding:11px 16px;font:inherit;font-weight:700;cursor:pointer}.primary{margin-top:16px;background:var(--ink);border:1px solid var(--ink);color:#fff}.primary:hover{background:var(--charcoal)}.secondary{margin-top:10px;background:#fff;border:1px solid #cbd3d8;color:var(--charcoal)}.secondary:hover{background:#f7f9fa;border-color:#9ca8b0}.quiet{background:transparent;border:0;color:var(--cyan-deep);min-height:40px;margin-top:4px}.quiet:hover{text-decoration:underline;text-underline-offset:3px}button:focus-visible,.otp:focus-visible{outline:3px solid rgba(101,200,232,.5);outline-offset:2px}
+        .message{border-radius:8px;padding:12px 14px;margin:0 0 18px;font-size:13px;line-height:1.5}.error{background:#fff4f3;border:1px solid #efc8c4;color:var(--danger)}.info{background:#edf9fc;border:1px solid #b9e4ed;color:#1b6170}.divider{height:1px;background:var(--line);margin:22px 0 10px}.hint{font-size:12px;color:#7b858d;margin:18px 0 0;text-align:center;line-height:1.5}
+        @media(max-width:820px){body{padding:0}.shell{grid-template-columns:1fr;min-height:100vh;border:0;border-radius:0;box-shadow:none}.brand-panel{min-height:250px;padding:28px clamp(24px,7vw,52px)}.statement h1{font-size:clamp(30px,8vw,44px);margin:20px 0 10px}.statement p{display:none}.main{padding:40px clamp(24px,7vw,52px) 32px}}@media(max-width:430px){.brand-panel{min-height:220px}.main{align-content:start}.otp{font-size:24px;letter-spacing:.26em}}
+    </style>
+</head>
+<body>
+<main class="shell">
+    <section class="brand-panel" aria-label="Physical Desk">
+        <div class="wordmark"><span class="mark" aria-hidden="true"><span>PD</span><span class="number">57</span></span><span class="wordmark-copy"><strong>PD57</strong><small>Physical Desk</small></span></div>
+        <div class="statement"><span class="kicker">Employee Request Management</span><h1>Secure by design.<br>Simple by default.</h1><p>A second verification step protects your requests and operational information.</p></div>
+        <div class="brand-meta">Secure sign-in · Code expires automatically</div>
+    </section>
+    <section class="main">
+        <div class="content">
+            <p class="eyebrow">One more step</p>
+            <h2>Verify your sign-in</h2>
+            <p class="sub">We sent a 6-digit code to the email on file for <strong><?= $safeUsername ?></strong>.</p>
+            <?php if ($safeError !== ''): ?><div class="message error" role="alert"><?= $safeError ?></div><?php endif; ?>
+            <?php if ($safeInfo !== ''): ?><div class="message info" role="status"><?= $safeInfo ?></div><?php endif; ?>
+            <form method="post" autocomplete="off">
+                <input type="hidden" name="_glpi_csrf_token" value="<?= $safeToken ?>">
+                <label for="pd57_otp_code">Verification code</label>
+                <input class="otp" type="text" id="pd57_otp_code" name="pd57_otp_code" maxlength="6" pattern="[0-9]{6}" placeholder="000000" inputmode="numeric" autocomplete="one-time-code" autofocus required aria-describedby="otp-guidance">
+                <button type="submit" name="pd57_otp_submit" class="primary">Verify and sign in</button>
+            </form>
+            <div class="divider"></div>
+            <form method="post"><input type="hidden" name="_glpi_csrf_token" value="<?= $safeToken ?>"><button type="submit" name="pd57_otp_resend" class="secondary">Resend code</button></form>
+            <form method="post"><input type="hidden" name="_glpi_csrf_token" value="<?= $safeToken ?>"><button type="submit" name="pd57_otp_cancel" class="quiet">Cancel and return to login</button></form>
+            <p class="hint" id="otp-guidance">Code valid for <?= $expiryMinutes ?> minutes. Check your spam folder if it has not arrived.</p>
+        </div>
+    </section>
+</main>
+</body>
+</html>

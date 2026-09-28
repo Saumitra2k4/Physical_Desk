@@ -71,7 +71,7 @@ if (PHP_SAPI === 'cli') {
         $_SERVER['argc']--;
     }
 
-    $kernel = new Kernel();
+    $kernel = new Kernel('production');
     $kernel->boot();
 
     if ($is_superuser) {
@@ -134,6 +134,13 @@ if (PHP_SAPI === 'cli') {
     } else {
         // Default from configuration
         CronTask::launch(CronTask::MODE_EXTERNAL, $CFG_GLPI['cron_limit']);
+    }
+    // PD57 owns only its local operational state; GLPI remains scheduler authority.
+    $pd57Operations = dirname(__DIR__) . '/plugins/pd57portal/inc/operations.php';
+    if (is_file($pd57Operations)) {
+        require_once $pd57Operations;
+        pd57_ops_install_schema();
+        pd57_ops_run();
     }
 } else {
     // Execution from the web context

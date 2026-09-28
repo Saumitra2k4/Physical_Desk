@@ -180,6 +180,65 @@ MANUAL_TRIAGE_INFO = {
     "source": "fallback",
 }
 
+# Phase 4 hierarchy. The deterministic router is intentionally narrow: it is
+# only used when the request itself is unambiguous.  All other requests retain
+# MiniLM/NLI assistance and can abstain to Employee Services Desk.
+FAST_ROUTES = [
+    (('treadmill', 'equipment is unsafe', 'studio equipment'), ('Studio Operations', 'Facilities & Equipment', 'Equipment Issue', 'Operations > Studio Equipment > Cardio Equipment')),
+    (('salary has not arrived', 'not received my salary', 'unpaid wages'), ('Payroll', 'Salary Processing', 'Salary Not Received', 'Payroll > Salary')),
+    (('medical reimbursement', 'reimbursement'), ('Payroll', 'Reimbursements', 'Reimbursement', 'Payroll > Reimbursement')),
+    (('payslip', 'pay slip'), ('Payroll', 'Payslips & Payroll Documents', 'Payslip', 'Payroll > Payslip')),
+    (('account is locked', 'account locked', 'locked out'), ('IT', 'Identity & Access', 'Account Lockout', 'IT > Identity & Access > Account Lockout')),
+    (('wi-fi', 'wifi'), ('IT', 'Network & Connectivity', 'Wi-Fi', 'IT > Network > Wi-Fi')),
+    (('experience letter',), ('HR', 'HR Documentation', 'Experience Letter', 'HR > Employee Records')),
+    (('laptop will not start', 'laptop won\'t start', 'desktop will not start'), ('IT', 'Desktop & Device Support', 'Device Support', 'IT > Hardware > Laptop / Desktop')),
+]
+
+HIERARCHY = {
+    "IT": {"hypothesis": "The employee needs technology, device, account, network, application, or infrastructure support.", "teams": {
+        "Desktop & Device Support": {"hypothesis":"A laptop, desktop, monitor, or workplace device is broken or will not start.", "types":{"Device Support":"A work computer or device needs repair or support."}},
+        "Identity & Access": {"hypothesis":"A company account, sign-in, access permission, or identity is unavailable.", "types":{"Account Lockout":"A company account is locked, disabled, blocked, or inaccessible."}},
+        "Network & Connectivity": {"hypothesis":"Wi-Fi, internet, or network connectivity is unavailable.", "types":{"Wi-Fi":"Wireless network or Wi-Fi connectivity is unavailable."}},
+    }},
+    "Payroll": {"hypothesis": "The employee needs salary, reimbursement, payslip, tax, deduction, or final settlement help.", "teams": {
+        "Salary Processing":{"hypothesis":"Salary or wages are missing, delayed, or need payroll processing.","types":{"Salary Not Received":"Employee salary or wages have not been paid or are delayed."}},
+        "Reimbursements":{"hypothesis":"An employee expense or medical reimbursement needs review or payment.","types":{"Reimbursement":"A submitted reimbursement needs a status or payment review."}},
+        "Payslips & Payroll Documents":{"hypothesis":"The employee needs a payslip or payroll document.","types":{"Payslip":"A payslip or pay statement is requested."}},
+    }},
+    "HR": {"hypothesis":"The employee needs HR documentation, leave, attendance, benefits, recruitment, or employee-relations support.", "teams": {
+        "HR Documentation":{"hypothesis":"The employee needs an experience letter, employment letter, or HR document.","types":{"Experience Letter":"An experience letter or employment document is requested."}},
+    }},
+    "Studio Operations": {"hypothesis":"The request concerns studio facilities, equipment, scheduling, front desk, supplies, vendors, or maintenance.", "teams": {
+        "Facilities & Equipment":{"hypothesis":"Studio equipment, a treadmill, facilities, or safety needs attention.","types":{"Equipment Issue":"Studio equipment or facilities are broken or unsafe."}},
+    }},
+}
+
+LEGACY_PATHS = {"Device Support":"IT > Hardware > Laptop / Desktop","Account Lockout":"IT > Identity & Access > Account Lockout","Wi-Fi":"IT > Network > Wi-Fi","Salary Not Received":"Payroll > Salary","Reimbursement":"Payroll > Reimbursement","Payslip":"Payroll > Payslip","Experience Letter":"HR > Employee Records","Equipment Issue":"Operations > Studio Equipment > Cardio Equipment"}
+
+def _fast_route(text: str):
+    value = text.lower()
+    for signals, route in FAST_ROUTES:
+        if any(signal in value for signal in signals):
+            return route
+    return None
+
+def _nli_best(text: str, choices: dict):
+    if not _model_ready or _model is None or _tokenizer is None: return None, 0.0
+    names=list(choices.keys()); pairs=[(text, choices[n]["hypothesis"]) for n in names]
+    inputs=_tokenizer(pairs,padding=True,truncation=True,max_length=256,return_tensors="pt")
+    with torch.no_grad(): logits=_model(**inputs).logits
+    scores=torch.softmax(torch.stack([logits[:,0],logits[:,1]],dim=1),dim=1)[:,1].numpy()
+    index=int(scores.argmax()); return names[index], float(scores[index])
+
+def _hierarchical_route(text: str, threshold: float):
+    department, score=_nli_best(text,HIERARCHY)
+    if not department or score < threshold: return None
+    team, team_score=_nli_best(text,HIERARCHY[department]["teams"])
+    if not team or team_score < threshold: return None
+    request_type, type_score=_nli_best(text,HIERARCHY[department]["teams"][team]["types"])
+    if not request_type or type_score < threshold: return None
+    return department, team, request_type, min(score,team_score,type_score)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic Models
@@ -211,6 +270,10 @@ class ClassifyResponse(BaseModel):
     fallback_used: bool = False
     model_name: str = MODEL_NAME
     inference_time_ms: float = 0.0
+    department: str = "Other / unknown"
+    team: str = "Employee Services Desk"
+    request_type: str = "Manual Triage"
+    hierarchy_confidence: float = 0.0
 
 
 class HealthResponse(BaseModel):
@@ -367,8 +430,17 @@ async def classify(req: ClassifyRequest):
     start = time.time()
 
     try:
-        suggestions = _classify(req.text, req.top_n, threshold)
+        route = _fast_route(req.text)
+        hierarchical = None if route else _hierarchical_route(req.text, threshold)
+        suggestions = _classify(req.text, req.top_n, threshold) if not (route or hierarchical) else []
         elapsed_ms = (time.time() - start) * 1000
+
+        if route:
+            department, team, request_type, path = route
+            suggestions = [CategorySuggestion(name=request_type, path=path, confidence=0.99, source="fast_domain_router")]
+        elif hierarchical:
+            department, team, request_type, confidence = hierarchical
+            suggestions = [CategorySuggestion(name=request_type, path=LEGACY_PATHS[request_type], confidence=round(confidence,4), source="hierarchical_minilm_nli")]
 
         if not suggestions:
             # Below threshold or model failure → Manual Triage fallback
@@ -378,16 +450,20 @@ async def classify(req: ClassifyRequest):
                 needs_human_review=True,
                 fallback_used=True,
                 inference_time_ms=round(elapsed_ms, 1),
+                department="Other / unknown", team="Employee Services Desk", request_type="Manual Triage", hierarchy_confidence=0.0,
             )
 
         logger.info("Classified: latency_ms=%.1f top_path=%s confidence=%.3f",
                     elapsed_ms, suggestions[0].path, suggestions[0].confidence)
 
+        department, team, request_type = (route[:3] if route else (hierarchical[:3] if hierarchical else ("Other / unknown", "Employee Services Desk", "Manual Triage")))
         return ClassifyResponse(
             suggestions=suggestions,
             needs_human_review=True,
             fallback_used=False,
             inference_time_ms=round(elapsed_ms, 1),
+            department=department, team=team, request_type=request_type,
+            hierarchy_confidence=0.99 if route else float(hierarchical[3] if hierarchical else suggestions[0].confidence),
         )
 
     except Exception:
@@ -398,6 +474,7 @@ async def classify(req: ClassifyRequest):
             needs_human_review=True,
             fallback_used=True,
             inference_time_ms=round(elapsed_ms, 1),
+            department="Other / unknown", team="Employee Services Desk", request_type="Manual Triage", hierarchy_confidence=0.0,
         )
 
 

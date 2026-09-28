@@ -78,6 +78,123 @@ function plugin_pd57classifier_fallback(string $reason): array
 }
 
 /** Validate the untrusted HTTP body and resolve canonical paths locally. */
+
+/**
+ * Convert the classifier's canonical GLPI category path into the PD57
+ * Department -> Team -> Request Type hierarchy.
+ *
+ * The classifier service returns ranked `suggestions`; it does not need to
+ * return duplicate top-level department/team/request_type fields.
+ */
+function plugin_pd57classifier_hierarchy_for_path(string $path, float $confidence = 0.0): array
+{
+    $route = null;
+
+    $exact = [
+        'IT > Network > Wi-Fi'
+            => ['IT', 'Network & Connectivity', 'Wi-Fi'],
+        'IT > Network > Internet'
+            => ['IT', 'Network & Connectivity', 'Network Outage'],
+        'IT > Network > LAN / Connectivity'
+            => ['IT', 'Network & Connectivity', 'Network Outage'],
+        'IT > Network > Network Equipment'
+            => ['IT', 'Network & Connectivity', 'Network Outage'],
+
+        'IT > Identity & Access > Account Lockout'
+            => ['IT', 'Identity & Access', 'Account Lockout'],
+        'IT > Identity & Access > Password / Login'
+            => ['IT', 'Identity & Access', 'Access Request'],
+        'IT > Identity & Access > Permission / Access'
+            => ['IT', 'Identity & Access', 'Access Request'],
+        'IT > Identity & Access > New Account'
+            => ['IT', 'Identity & Access', 'Access Request'],
+
+        'IT > Applications / Software'
+            => ['IT', 'Business Applications', 'Application Support'],
+        'IT > POS / Check-in Systems'
+            => ['IT', 'Business Applications', 'Application Support'],
+
+        'Payroll > Salary'
+            => ['Payroll', 'Salary Processing', 'Salary Information'],
+        'Payroll > Reimbursement'
+            => ['Payroll', 'Reimbursements', 'Reimbursement'],
+        'Payroll > Payslip'
+            => ['Payroll', 'Payslips & Payroll Documents', 'Payslip'],
+        'Payroll > Deduction'
+            => ['Payroll', 'Tax & Deductions', 'Tax / Deduction'],
+        'Payroll > Tax / Payroll Documentation'
+            => ['Payroll', 'Tax & Deductions', 'Tax / Deduction'],
+        'Payroll > Other Payroll'
+            => ['Payroll', 'Final Settlement', 'Final Settlement'],
+
+        'HR > Benefits'
+            => ['HR', 'Benefits', 'Benefits'],
+        'HR > Employee Records'
+            => ['HR', 'HR Documentation', 'HR Document'],
+        'HR > Hiring & Onboarding'
+            => ['HR', 'Talent & Recruitment', 'Recruitment'],
+        'HR > Leave & Attendance > Leave Request'
+            => ['HR', 'Leave & Attendance', 'Leave Request'],
+        'HR > Leave & Attendance > Attendance Correction'
+            => ['HR', 'Leave & Attendance', 'Attendance'],
+        'HR > Leave & Attendance > Shift / Schedule Query'
+            => ['HR', 'Leave & Attendance', 'Attendance'],
+        'HR > Workplace / People Support'
+            => ['HR', 'Employee Relations', 'Employee Relations'],
+        'HR > Policy / HR Query'
+            => ['HR', 'Employee Relations', 'Employee Relations'],
+        'HR > Other HR'
+            => ['HR', 'Employee Relations', 'Employee Relations'],
+
+        'Operations > Safety / Operational Incident'
+            => ['Studio Operations', 'Facilities & Equipment', 'Safety Incident'],
+        'Operations > Supplies / Inventory'
+            => ['Studio Operations', 'Inventory & Supplies', 'Supplies'],
+        'Operations > Vendor Issue'
+            => ['Studio Operations', 'Vendor & Maintenance', 'Vendor / Maintenance'],
+        'Operations > Studio Operations'
+            => ['Studio Operations', 'Concierge / Front Desk', 'Front Desk'],
+
+        'Other > Manual Triage'
+            => ['Other / unknown', 'Employee Services Desk', 'Manual Triage'],
+        'Other > General Request'
+            => ['Other / unknown', 'Employee Services Desk', 'Manual Triage'],
+    ];
+
+    if (isset($exact[$path])) {
+        $route = $exact[$path];
+    } elseif (str_starts_with($path, 'IT > Hardware')) {
+        $route = ['IT', 'Desktop & Device Support', 'Device Support'];
+    } elseif (str_starts_with($path, 'IT > Cybersecurity')
+        || $path === 'IT > Studio Audio / Visual'
+        || $path === 'IT > CCTV / Security Systems'
+        || $path === 'IT > Service Desk / General Support'
+        || $path === 'IT > Other IT') {
+        $route = ['IT', 'IT Infrastructure', 'Infrastructure'];
+    } elseif (str_starts_with($path, 'Operations > Studio Equipment')
+        || str_starts_with($path, 'Operations > Facility Maintenance')
+        || $path === 'Operations > Housekeeping') {
+        $route = ['Studio Operations', 'Facilities & Equipment', 'Equipment Issue'];
+    }
+
+    if ($route === null) {
+        return [
+            'department' => 'Other / unknown',
+            'team' => 'Employee Services Desk',
+            'request_type' => 'Manual Triage',
+            'confidence' => 0.0,
+        ];
+    }
+
+    return [
+        'department' => $route[0],
+        'team' => $route[1],
+        'request_type' => $route[2],
+        'confidence' => $confidence,
+    ];
+}
+
+
 function plugin_pd57classifier_parse_response(string $response): array
 {
     $data = json_decode($response, true);
@@ -117,6 +234,10 @@ function plugin_pd57classifier_parse_response(string $response): array
         'inference_time_ms' => is_numeric($data['inference_time_ms'] ?? null) ? max(0.0, (float)$data['inference_time_ms']) : 0.0,
         'failure_reason' => '',
         'classification_source' => 'ai_suggested',
+        'hierarchy' => plugin_pd57classifier_hierarchy_for_path(
+            (string)$valid[0]['path'],
+            (float)$valid[0]['confidence']
+        ),
     ];
 }
 
@@ -181,6 +302,13 @@ function plugin_pd57classifier_pre_item_add_ticket(Ticket $ticket): void
     if (strlen($text) >= 5) {
         $result = plugin_pd57classifier_call_service($text);
     }
+    if (!empty($_SESSION['pd57_forced_hierarchy']) && is_array($_SESSION['pd57_forced_hierarchy'])) {
+        $forced = $_SESSION['pd57_forced_hierarchy'];
+        $result['hierarchy'] = ['department'=>$forced['department'],'team'=>$forced['team'],'request_type'=>$forced['request_type'],'confidence'=>(float)$forced['confidence']];
+        // The employee's reviewed hierarchy is authoritative at creation time.
+        // Persist it as final before the item-add hook initializes ownership.
+        $result['final_hierarchy'] = $result['hierarchy'];
+    }
 
     $topAiCatId = (int)($result['suggestions'][0]['category_id'] ?? 0);
     $fallbackUsed = !empty($result['fallback_used']);
@@ -219,6 +347,7 @@ function plugin_pd57classifier_pre_item_add_ticket(Ticket $ticket): void
         'explicit_category_selected'  => $explicitCategorySelected,
         'user_selected_category_id'   => $userCategoryId,
         'failure_reason'              => $result['failure_reason'] ?? ($result === null ? 'classifier_short_text' : ''),
+        'hierarchy'                   => $result['hierarchy'] ?? ['department'=>'Other / unknown','team'=>'Employee Services Desk','request_type'=>'Manual Triage','confidence'=>0.0],
     ];
 }
 
@@ -231,6 +360,11 @@ function plugin_pd57classifier_pre_item_add_ticket(Ticket $ticket): void
 function plugin_pd57classifier_item_add_ticket(Ticket $ticket): void
 {
     global $DB;
+
+    // Ticket creation can occur outside the portal front controller.
+    if (!function_exists('pd57_p4_record_classification')) {
+        require_once dirname(__DIR__) . '/pd57portal/inc/admin.php';
+    }
 
     $classification = $_SESSION['pd57_classification'] ?? null;
     unset($_SESSION['pd57_classification']);
@@ -245,6 +379,17 @@ function plugin_pd57classifier_item_add_ticket(Ticket $ticket): void
     }
 
     plugin_pd57classifier_ensure_table();
+    if (function_exists('pd57_p4_record_classification')) {
+        $hierarchy = $classification['hierarchy'] ?? [];
+        $final = $classification['final_hierarchy'] ?? null;
+        pd57_p4_record_classification($ticketId, [
+            (string)($hierarchy['department'] ?? 'Other / unknown'),
+            (string)($hierarchy['team'] ?? 'Employee Services Desk'),
+            (string)($hierarchy['request_type'] ?? 'Manual Triage'),
+        ], (float)($hierarchy['confidence'] ?? 0.0), is_array($final) ? [
+            (string)($final['department'] ?? ''), (string)($final['team'] ?? ''), (string)($final['request_type'] ?? ''),
+        ] : null);
+    }
 
     $suggestions = $classification['suggestions'] ?? [];
     $topSuggestion = $suggestions[0] ?? null;
@@ -301,6 +446,11 @@ function plugin_pd57classifier_item_add_ticket(Ticket $ticket): void
                 $topScore * 100
             )
         );
+    }
+    // Phase 4 ownership and priority are initialized once the durable
+    // classification record exists; this never changes employee confirmation.
+    if (function_exists('pd57_ops_state')) {
+        pd57_ops_state($ticketId);
     }
 }
 
